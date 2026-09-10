@@ -21,6 +21,11 @@ class PlanRow:
     row: RowRef
     prompt_tokens: tuple[int, ...]
     positions: tuple[int, ...]  # absolute positions this step consumes
+    max_new_tokens: int = 0  # prefill window sizing
+    # VL inputs (image spans must lie inside the first prefill chunk; the reference
+    # model takes images + token_types on the start_pos==0 forward only)
+    token_types: tuple[int, ...] | None = None
+    images: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -45,7 +50,14 @@ class StaticCohortScheduler:
 
     def next_plan(self, waiting: Sequence[_Request], active: dict[int, _Request]) -> Optional[StepPlan]:
         if active:
-            return self._decode_plan(active)
+            if all(getattr(r, "done", False) for r in active.values()):
+                # cohort drained: release every row (slot generations advance), admit next
+                for slot, req in active.items():
+                    self.state.release(slot, req.req_id, req.row_ref.generation)
+                active.clear()
+            else:
+                # finished rows stay in the batch (fixed collectives) but stop emitting
+                return self._decode_plan(active)
         if not waiting:
             return None
         return self._admit(waiting, active)
@@ -86,7 +98,13 @@ class StaticCohortScheduler:
             req.row_ref = row  # type: ignore[attr-defined]
             active[row.slot] = req
             rows.append(
-                PlanRow(req.req_id, row, req.prompt_tokens, tuple(range(len(req.prompt_tokens))))
+                PlanRow(
+                    req.req_id,
+                    row,
+                    req.prompt_tokens,
+                    tuple(range(len(req.prompt_tokens))),
+                    max_new_tokens=req.params.max_new_tokens,
+                )
             )
         return StepPlan(ordinal=0, op="prefill", rows=tuple(rows))
 

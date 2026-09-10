@@ -142,10 +142,9 @@ class LLMEngine:
         handle._emit(
             TerminalEvent(finish, len(req.prompt_tokens), len(req.completion))
         )
-        slot = self._slot_of(req.req_id)
-        if slot is not None:
-            self.state.release(slot, req.req_id, req.row_ref.generation)
-            self._active.pop(slot, None)
+        # Stage A: the row stays in the fixed cohort (the reference batch and its
+        # collectives cannot shrink mid-flight). The scheduler releases all rows
+        # when the cohort drains; a cancelled row is simply a non-emitting row.
 
     def _slot_of(self, req_id: int) -> Optional[int]:
         return self.state.owned_by(req_id)
