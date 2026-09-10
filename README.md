@@ -91,13 +91,20 @@ compared decode steps; exact prefill-logit parity).
 | --- | ---: | ---: | --- |
 | Baseline (2026-09-10) | 270 ms/token (3.7 tok/s) | 543 tok/s (15.08 s) | Reference per-expert loop |
 | FP4 GEMV (2026-09-11) | 184 ms/token (5.4 tok/s) | — | M=1 fp4-e2m1 Triton GEMV for decode-time expert calls; bit-identical to the fp4 GEMM path |
-| **Current (2026-09-11)** | **87.7–88.1 ms/token (11.35–11.41 tok/s)** | **801 tok/s (10.23 s)** | Fixed-slot grouped MoE with CUDA graphs around each complete MoE region (gate, routed + shared experts, reduction); GPU-side routing with no host syncs |
+| Grouped MoE + graphs (2026-09-11) | 87.7–88.1 ms/token (11.35–11.41 tok/s) | 801 tok/s (10.23 s) | Fixed-slot grouped MoE with CUDA graphs around each complete MoE region (gate, routed + shared experts, reduction); GPU-side routing with no host syncs |
+| **+ grouped prefill (2026-09-11)** | **~91 ms/token (10.9 tok/s)** | **1794 tok/s (4.57 s)** | M>1 grouped expert execution for prefill: expert-major token tiles on bf16 tensor cores, exact fp4→bf16 in-kernel dequant, fused SwiGLU, fp32 atomic accumulation; routing fully on GPU. 7.2×/4.2×/2.2× at 512/2048/8192 tokens |
 
 Notes:
 
 - Decode rate is flat between 512 and 8,192 context tokens in the measured range.
-- The grouped-MoE/CUDA-graph work targets decode only; cold prefill is unchanged
-  from the corrected reference baseline (801 tok/s in the matched A/B).
+- The grouped-MoE/CUDA-graph work targets decode only; the grouped-prefill row
+  changes cold prefill (800 → 1794 tok/s at 8K; 143 → 1023 at 512, 374 → 1561 at
+  2048) while decode stays on the exact-parity W4A8 fixed-slot path.
+- Prefill numerics: the grouped kernels are closer to the dequantized f64
+  ground truth than the reference's fp8-quantized activations (kernel-level
+  oracle), so optimized-vs-reference prefill logits differ by up to ~0.9
+  absolute (~2% of logit scale) with 100% greedy top-1 agreement at every
+  measured length; decode parity remains exact (0.0).
 - The 25/50 tok/s decode and 3K/6K prefill figures are unachieved milestones, not
   claims. First graph capture is paid once at startup; c>1 performance is not
   inferred from c=1.
