@@ -1,14 +1,12 @@
 # DS41F — a minimal serving engine for DeepSeek-V4.1-Flash
 
 DS41F turns the [reference inference implementation](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)
-released with DeepSeek-V4.1-Flash into a serving engine with a small, testable core. It
-does **not** fork a general-purpose engine: the model's shared-latent KV, compressed
-sparse attention, SWA rings and Engram conditional memory don't fit conventional paged
-KV abstractions, so the backend is a thin adapter over the reference model code, and
-the control plane is built for its actual constraints.
+released with DeepSeek-V4.1-Flash into a serving engine with a small, testable core. 
 
-Status: engine skeleton with a deterministic fake backend and full control-flow test
-suite. The real backend adapter (torchrun TP=4) is in development; see roadmap below.
+DS 4.1 Flash's  shared-latent KV, compressed sparse attention, SWA rings and Engram conditional memory don't fit conventional paged
+KV abstractions, so the backend is a thin adapter over the reference model code, and the control plane is built for its actual constraints.
+
+Status: engine skeleton with a deterministic fake backend and full control-flow test suite. The real backend adapter (torchrun TP=4) is in development; see roadmap below.
 
 ## Design
 
@@ -93,9 +91,7 @@ Where a ~330 ms/token decode step goes (kernel time = 272 ms; the rest is host g
 | Sparse attention | 3 | fine |
 
 Implications: the NCCL time partly reflects rank skew from the uneven expert
-distribution; a grouped small-M MoE path is the highest-value optimization. These
-measurements and the analysis methodology are documented in the project's internal
-engineering notes.
+distribution; a grouped small-M MoE path is the highest-value optimization.
 
 ## Roadmap
 
