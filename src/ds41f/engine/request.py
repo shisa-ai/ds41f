@@ -65,10 +65,15 @@ class _Request:
 
     _IDS = itertools.count(1)
 
-    def __init__(self, prompt_tokens: Sequence[int], params: SamplingParams):
+    def __init__(self, prompt_tokens: Sequence[int], params: SamplingParams, exclusive: bool = False, meta=None):
         self.req_id = next(_Request._IDS)
         self.prompt_tokens: tuple[int, ...] = tuple(prompt_tokens)
         self.params = params
+        # exclusive: schedule alone in its own cohort (e.g. prefix-cache restore rows
+        # cannot share a start_pos=0 bulk prefill with fresh rows)
+        self.exclusive = exclusive
+        # meta: opaque per-request payload for backend adapters (prefix hits, VL inputs)
+        self.meta = meta
         self.created = time.monotonic()
         self.completion: list[int] = []
         self.finish_reason: Optional[FinishReason] = None

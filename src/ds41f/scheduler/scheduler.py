@@ -24,6 +24,7 @@ class PlanRow:
     max_new_tokens: int = 0  # prefill window sizing
     temperature: float = 0.0  # 0 = greedy
     top_p: float = 1.0
+    meta: object = None  # opaque backend payload (prefix hit, VL inputs, ...)
     # VL inputs (image spans must lie inside the first prefill chunk; the reference
     # model takes images + token_types on the start_pos==0 forward only)
     token_types: tuple[int, ...] | None = None
@@ -49,11 +50,16 @@ class StaticCohortScheduler:
     def __init__(self, config: EngineConfig, state: StateStore):
         self.config = config
         self.state = state
+        # rows drained by the most recent next_plan call; the engine reads and
+        # clears this to snapshot them before the admitted prefill overwrites
+        # their cache rows
+        self.drained: list = []
 
     def next_plan(self, waiting: Sequence[_Request], active: dict[int, _Request]) -> Optional[StepPlan]:
         if active:
             if all(getattr(r, "done", False) for r in active.values()):
                 # cohort drained: release every row (slot generations advance), admit next
+                self.drained = sorted(active.values(), key=lambda r: r.row_ref.slot)
                 for slot, req in active.items():
                     self.state.release(slot, req.req_id, req.row_ref.generation)
                 active.clear()
@@ -89,7 +95,12 @@ class StaticCohortScheduler:
             if not self.state.can_admit(len(req.prompt_tokens), req.params.max_new_tokens):
                 requeue.append(req)  # over context budget: requeue, never admit partially
                 continue
+            if req.exclusive and cohort:
+                requeue.append(req)  # exclusive rows run alone; wait for the next cohort
+                continue
             cohort.append(req)
+            if req.exclusive:
+                stop = True  # nothing else may join an exclusive row's cohort
         if requeue:
             waiting.extendleft(reversed(requeue))  # preserve original queue order
         if not cohort:
@@ -108,6 +119,7 @@ class StaticCohortScheduler:
                     max_new_tokens=req.params.max_new_tokens,
                     temperature=req.params.temperature,
                     top_p=req.params.top_p,
+                    meta=req.meta,
                 )
             )
         return StepPlan(ordinal=0, op="prefill", rows=tuple(rows))

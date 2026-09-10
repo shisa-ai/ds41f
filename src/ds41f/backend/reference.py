@@ -70,6 +70,14 @@ class ReferenceBackend:
         rows = sorted(plan.rows, key=lambda r: r.row.slot)
         self._rows = rows
         self._params = [(r.temperature, r.top_p) for r in rows]
+        # prefix-cache restore: the row's state for tokens [0, shared) is supplied
+        # by the snapshot; no start_pos=0 forward runs, and the suffix is consumed
+        # by ordinary decode steps (teacher-forced until the prompt is exhausted).
+        # Exclusive single-row cohorts only (the engine enforces this).
+        if all(getattr(r, "meta", None) and getattr(r.meta, "prefix_hit", None) for r in rows) and len(rows) == 1:
+            return self._prefill_from_snapshot(rows[0])
+        if any(getattr(r, "meta", None) and getattr(r.meta, "prefix_hit", None) for r in rows):
+            raise RuntimeError("prefix-hit rows must be scheduled in exclusive single-row cohorts")
         prompt_lens = [len(r.prompt_tokens) for r in rows]
         min_len = min(prompt_lens)
         # window: the longest prompt still consumes (plen - min_len) one-token steps
@@ -92,6 +100,21 @@ class ReferenceBackend:
         self._prev_pos = min_len
         self._cur_pos = min_len
         return self._collect(out_ids, logits, min_len)
+
+    def _prefill_from_snapshot(self, row):
+        """Restore row state from `row.meta` and position the cursor at the shared
+        boundary. meta carries: prefix_hit (truthy), shared_len, restore(payload)
+        callable, and optionally an engine-side hook for multi-rank restore."""
+        meta = row.meta
+        self._tokens = _new_tokens_buffer(1, len(row.prompt_tokens) + row.max_new_tokens + 1,
+                                           [row], [len(row.prompt_tokens)])
+        self._prompt_lens = [len(row.prompt_tokens)]
+        self._req_ids = [row.req_id]
+        meta.restore()
+        self._prev_pos = meta.shared_len
+        self._cur_pos = meta.shared_len
+        # no forward, no emission: the first decode step consumes prompt[shared]
+        return [StepResult(row.req_id, (), None)]
 
     # -- decode --------------------------------------------------------------
 

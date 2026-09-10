@@ -45,6 +45,11 @@ class LLMEngine:
         self._wakeup = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
+        # on_drain(cohort_requests) fires after a cohort fully drains and before the
+        # next prefill executes -- the one window where the drained rows' caches are
+        # still intact for snapshot capture
+        self.on_drain = None
+        self._last_cohort: list = []
 
     # -- public API --------------------------------------------------------
 
@@ -90,6 +95,23 @@ class LLMEngine:
             if self._stopped.is_set():
                 break
             plan = self.scheduler.next_plan(self._waiting, self._active)
+            # eager drain capture, two paths:
+            # (a) the scheduler drained the cohort while admitting a new one (its
+            #     rows are handed over via scheduler.drained; capture them now,
+            #     before the admitted prefill overwrites their cache rows)
+            # (b) the cohort drained with the engine otherwise idle (drain-check
+            #     below fires within one loop tick of the last completion)
+            drained = getattr(self.scheduler, "drained", None)
+            if drained:
+                self.scheduler.drained = []
+                if self.on_drain is not None:
+                    self.on_drain(drained)
+            if self._last_cohort and not self._active and all(
+                getattr(r, "done", False) for r in self._last_cohort
+            ):
+                if self.on_drain is not None:
+                    self.on_drain(self._last_cohort)
+                self._last_cohort = []
             if plan is None:
                 self._wakeup.clear()
                 if self._waiting or self._active or not self._control.empty():
@@ -99,6 +121,8 @@ class LLMEngine:
                 self._wakeup.wait(timeout=0.05)
                 continue
             results = self.backend.execute(plan, self.state)
+            if plan.op == "prefill":
+                self._last_cohort = sorted(self._active.values(), key=lambda r: r.row_ref.slot)
             self._deliver(results)
         self._fail_remaining()
 
@@ -138,13 +162,23 @@ class LLMEngine:
         assert not req.terminal_sent
         req.finish_reason = finish
         req.terminal_sent = True
+        # Stage A: the row stays in the fixed cohort (the reference batch and its
+        # collectives cannot shrink mid-flight). The scheduler releases all rows
+        # when the cohort drains; a cancelled row is simply a non-emitting row.
+        # When this was the cohort's last unfinished row, snapshot it BEFORE the
+        # terminal event is queued: the client can submit its next request the
+        # moment it reads the terminal, and that request's prefix lookup must
+        # already see this conversation's snapshot.
+        if self._last_cohort and all(
+            getattr(r, "done", False) for r in self._last_cohort
+        ):
+            if self.on_drain is not None:
+                self.on_drain(self._last_cohort)
+            self._last_cohort = []
         handle = RequestHandle(req)
         handle._emit(
             TerminalEvent(finish, len(req.prompt_tokens), len(req.completion))
         )
-        # Stage A: the row stays in the fixed cohort (the reference batch and its
-        # collectives cannot shrink mid-flight). The scheduler releases all rows
-        # when the cohort drains; a cancelled row is simply a non-emitting row.
 
     def _slot_of(self, req_id: int) -> Optional[int]:
         return self.state.owned_by(req_id)
