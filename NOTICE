@@ -1,0 +1,25 @@
+DS41F
+Copyright 2026 DS41F contributors
+
+This product includes software developed as part of the DS41F project
+(https://github.com/ds41f/ds41f).
+
+==============================================================================
+Third-party notices
+==============================================================================
+
+This project builds on the reference inference implementation released with
+DeepSeek-V4.1-Flash:
+
+  deepseek-ai/DeepSeek-V4.1-Flash (Hugging Face), inference/ and encoding/
+  directories — Copyright (c) DeepSeek AI, licensed under the MIT License.
+  https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash
+
+Model weights, tokenizer and prompt-encoding specification originate from that
+repository and remain subject to its license. Portions of this project adapted
+from that reference implementation are marked in the file headers.
+
+nano-vLLM request/step engine structure is informed by:
+
+  GeeeekExplorer/nano-vllm — Copyright (c) 2025 Xingkai Yu, MIT License.
+  https://github.com/GeeeekExplorer/nano-vllm
