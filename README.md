@@ -92,7 +92,7 @@ compared decode steps; exact prefill-logit parity).
 | Baseline (2026-09-10) | 270 ms/token (3.7 tok/s) | 543 tok/s (15.08 s) | Reference per-expert loop |
 | FP4 GEMV (2026-09-11) | 184 ms/token (5.4 tok/s) | — | M=1 fp4-e2m1 Triton GEMV for decode-time expert calls; bit-identical to the fp4 GEMM path |
 | Grouped MoE + graphs (2026-09-11) | 87.7–88.1 ms/token (11.35–11.41 tok/s) | 801 tok/s (10.23 s) | Fixed-slot grouped MoE with CUDA graphs around each complete MoE region (gate, routed + shared experts, reduction); GPU-side routing with no host syncs |
-| **+ grouped prefill (2026-09-11)** | **~91 ms/token (10.9 tok/s)** | **1794 tok/s (4.57 s)** | M>1 grouped expert execution for prefill: expert-major token tiles on bf16 tensor cores, exact fp4→bf16 in-kernel dequant, fused SwiGLU, fp32 atomic accumulation; routing fully on GPU. 7.2×/4.2×/2.2× at 512/2048/8192 tokens |
+| **+ grouped prefill (2026-09-11)** | **~89.4 ms/token (11.2 tok/s)** | **1798 tok/s (4.56 s)** | M>1 grouped expert execution for prefill: expert-major token tiles on bf16 tensor cores, exact fp4→bf16 in-kernel dequant, fused SwiGLU, fp32 atomic accumulation; routing fully on GPU. 7.2×/4.2×/2.2× at 512/2048/8192 tokens |
 
 Notes:
 
