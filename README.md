@@ -79,9 +79,33 @@ With the Engram hash tables offloaded to pinned host memory
 The Engram is 196B parameters of n-gram-hash-addressed fp8 lookup tables; only tiny
 per-token row gathers cross PCIe, which is why offloading it is essentially free.
 
+## Performance results (c=1, text, TP=4, greedy)
+
+All rows are model measurements with warmed code/JIT and graph setup, cold prefix
+cache, fresh state, slowest-rank reporting. Prefill is cold prompt processing; decode
+is steady-state token generation. Numerics were verified bit-exact against the
+reference path (max logit difference 0, KL 0, 100% top-1 agreement on all 128
+compared decode steps; exact prefill-logit parity).
+
+| Stage | c=1 decode, 8K context | Cold 8K prefill | What changed |
+| --- | ---: | ---: | --- |
+| Baseline (2026-09-10) | 270 ms/token (3.7 tok/s) | 543 tok/s (15.08 s) | Reference per-expert loop |
+| FP4 GEMV (2026-09-11) | 184 ms/token (5.4 tok/s) | — | M=1 fp4-e2m1 Triton GEMV for decode-time expert calls; bit-identical to the fp4 GEMM path |
+| **Current (2026-09-11)** | **87.7–88.1 ms/token (11.35–11.41 tok/s)** | **801 tok/s (10.23 s)** | Fixed-slot grouped MoE with CUDA graphs around each complete MoE region (gate, routed + shared experts, reduction); GPU-side routing with no host syncs |
+
+Notes:
+
+- Decode rate is flat between 512 and 8,192 context tokens in the measured range.
+- The grouped-MoE/CUDA-graph work targets decode only; cold prefill is unchanged
+  from the corrected reference baseline (801 tok/s in the matched A/B).
+- The 25/50 tok/s decode and 3K/6K prefill figures are unachieved milestones, not
+  claims. First graph capture is paid once at startup; c>1 performance is not
+  inferred from c=1.
+
 ## Decode profile (B=1, 2K prompt, greedy, TP=4)
 
-Where a ~330 ms/token decode step goes (kernel time = 272 ms; the rest is host gaps):
+Baseline decomposition, measured before the grouped-MoE work — where a ~330 ms/token
+decode step went (kernel time = 272 ms; the rest is host gaps):
 
 | Component | ms/step | Notes |
 | --- | ---: | --- |
@@ -91,7 +115,8 @@ Where a ~330 ms/token decode step goes (kernel time = 272 ms; the rest is host g
 | Sparse attention | 3 | fine |
 
 Implications: the NCCL time partly reflects rank skew from the uneven expert
-distribution; a grouped small-M MoE path is the highest-value optimization.
+distribution; the grouped small-M MoE path identified here is what the current
+results implement (with the FP4 GEMV), taking decode from 270 to 88 ms/token.
 
 ## Roadmap
 
