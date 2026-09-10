@@ -29,12 +29,18 @@ from ..state.slots import StateStore
 from .base import StepResult
 
 TEXT = -1  # token_type for text positions (matches image_processor.TEXT)
+DEVICE = "cuda"  # set by ReferenceBackend.__init__ (module-level default)
 
 
 class ReferenceBackend:
-    def __init__(self, model, eos_token_id: int, sampler=None):
+    def __init__(self, model, eos_token_id: int, sampler=None, device: str = "cuda"):
         self.model = model
         self.eos_token_id = eos_token_id
+        # explicit device: torch's default device is thread-local, and the engine
+        # runs execute() on its own thread where no default was set
+        self.device = device
+        global DEVICE
+        DEVICE = device
         # sampler(logits_row, params) -> token_id; default greedy
         self.sampler = sampler
         self._reset()
@@ -62,6 +68,8 @@ class ReferenceBackend:
 
     def _prefill(self, plan: StepPlan) -> list[StepResult]:
         rows = sorted(plan.rows, key=lambda r: r.row.slot)
+        self._rows = rows
+        self._params = [(r.temperature, r.top_p) for r in rows]
         prompt_lens = [len(r.prompt_tokens) for r in rows]
         min_len = min(prompt_lens)
         # window: the longest prompt still consumes (plen - min_len) one-token steps
@@ -75,7 +83,7 @@ class ReferenceBackend:
         self._prompt_lens = prompt_lens
         self._req_ids = [r.req_id for r in rows]
 
-        out_ids, _, _ = self.model.forward(
+        out_ids, logits, _ = self.model.forward(
             self._tokens[:, :min_len],
             0,
             images=[r.images for r in rows] if any(r.images for r in rows) else None,
@@ -83,7 +91,7 @@ class ReferenceBackend:
         )
         self._prev_pos = min_len
         self._cur_pos = min_len
-        return self._collect(out_ids, min_len)
+        return self._collect(out_ids, logits, min_len)
 
     # -- decode --------------------------------------------------------------
 
@@ -96,14 +104,14 @@ class ReferenceBackend:
         total = self._tokens.shape[1]
         if cur >= total:
             raise RuntimeError("token buffer exhausted; cohort window was too small")
-        out_ids, _, _ = self.model.forward(self._tokens[:, cur : cur + 1], cur)
+        out_ids, logits, _ = self.model.forward(self._tokens[:, cur : cur + 1], cur)
         self._cur_pos = cur + 1
-        return self._collect(out_ids, cur + 1)
+        return self._collect(out_ids, logits, cur + 1)
 
     # -- shared --------------------------------------------------------------
 
-    def _collect(self, out_ids, position: int) -> list[StepResult]:
-        """Apply prompt override, decide emission and finishes at `position`."""
+    def _collect(self, out_ids, logits, position: int) -> list[StepResult]:
+        """Apply prompt override, sample per row, decide emission and finishes."""
         results = []
         for i, req_id in enumerate(self._req_ids):
             prompt_len = self._prompt_lens[i]
@@ -113,12 +121,36 @@ class ReferenceBackend:
                 # sits in the buffer for the next step to consume.
                 results.append(StepResult(req_id, (), None))
                 continue
-            token = int(out_ids[i].item() if hasattr(out_ids[i], "item") else out_ids[i][0])
+            token = self._sample(i, out_ids, logits)
             if position < self._tokens.shape[1]:
                 self._tokens[i, position] = token
             finish = "stop" if token == self.eos_token_id else None
             results.append(StepResult(req_id, (token,), finish))
         return results
+
+    def _sample(self, i, out_ids, logits):
+        """Per-row sampling. Uses logits when the model provides them; falls back
+        to the model's own sampled ids (stub models, or engines that sample in
+        the model). temperature 0 = greedy; otherwise top-p then Gumbel-max."""
+        temperature, top_p = self._params[i]
+        if logits is None:
+            return int(out_ids[i].item() if hasattr(out_ids[i], "item") else out_ids[i][0])
+        import torch
+
+        row = logits[i].float()
+        if temperature <= 0:
+            return int(row.argmax().item())
+        if top_p < 1.0:
+            sorted_logits, idx = row.sort(descending=True)
+            cum = torch.softmax(sorted_logits / temperature, -1).cumsum(-1)
+            keep = cum - torch.softmax(sorted_logits / temperature, -1) < top_p
+            keep[0] = True
+            row = torch.full_like(row, float("-inf"))
+            row[idx[keep]] = sorted_logits[keep]
+        else:
+            row = row / temperature
+        probs = torch.softmax(row, -1)
+        return int(probs.div(torch.empty_like(probs).exponential_(1)).argmax().item())
 
 
 def _new_tokens_buffer(batch: int, total: int, rows, prompt_lens):
@@ -127,9 +159,9 @@ def _new_tokens_buffer(batch: int, total: int, rows, prompt_lens):
     only already-filled positions are ever passed to the model)."""
     import torch
 
-    tokens = torch.full((batch, total), 0, dtype=torch.long)
+    tokens = torch.full((batch, total), 0, dtype=torch.long, device=DEVICE)
     for i, (r, plen) in enumerate(zip(rows, prompt_lens)):
-        tokens[i, :plen] = torch.tensor(r.prompt_tokens, dtype=torch.long)
+        tokens[i, :plen] = torch.tensor(r.prompt_tokens, dtype=torch.long, device=DEVICE)
     return tokens
 
 
@@ -139,9 +171,9 @@ def _stack_token_types(rows, seqlen):
         return None
     import torch
 
-    types = torch.full((len(rows), seqlen), TEXT, dtype=torch.long)
+    types = torch.full((len(rows), seqlen), TEXT, dtype=torch.long, device=DEVICE)
     for i, r in enumerate(rows):
         if r.token_types is not None:
-            t = torch.tensor(r.token_types[:seqlen], dtype=torch.long)
+            t = torch.tensor(r.token_types[:seqlen], dtype=torch.long, device=DEVICE)
             types[i, : t.numel()] = t
     return types

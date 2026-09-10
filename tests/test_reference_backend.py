@@ -102,3 +102,70 @@ def test_buffer_window_covers_long_prompt_plus_max_new():
         res = be.execute(make_decode(rows), state)
     # buffer must not have overflowed
     assert be._cur_pos <= be._tokens.shape[1]
+
+
+class LogitsStubModel:
+    """logits concentrated on token (last+2)%1000 (greedy) and (last+3)%1000."""
+
+    def forward(self, input_ids, start_pos, images=None, token_types=None):
+        import torch
+
+        out = (input_ids[:, -1] + 1) % 1000
+        B = input_ids.shape[0]
+        V = 1000
+        logits = torch.full((B, V), -50.0)
+        for b in range(B):
+            last = int(input_ids[b, -1].item())
+            logits[b, (last + 2) % V] = 10.0
+            logits[b, (last + 3) % V] = 5.0
+        return out, logits, None
+
+
+def test_per_row_sampling_greedy_uses_logits_not_model_ids():
+    be = ReferenceBackend(LogitsStubModel(), eos_token_id=500)
+    plan = make_prefill([3], max_new=4)
+    # row asks temperature=0: must pick argmax from logits ((last+2)), not the
+    # model's own sampled ids ((last+1))
+    plan = StepPlan(
+        ordinal=0,
+        op="prefill",
+        rows=(
+            PlanRow(
+                req_id=1,
+                row=RowRef(slot=0, generation=0),
+                prompt_tokens=(100, 101, 102),
+                positions=(0, 1, 2),
+                max_new_tokens=4,
+                temperature=0.0,
+            ),
+        ),
+    )
+    res = be.execute(plan, StateStore(1, 100))
+    assert res[0].tokens == (104,)  # 102 + 2, from logits
+
+
+def test_per_row_sampling_temperature_falls_in_top_p_support():
+    torch.manual_seed(0)
+    be = ReferenceBackend(LogitsStubModel(), eos_token_id=500)
+    plan = StepPlan(
+        ordinal=0,
+        op="prefill",
+        rows=(
+            PlanRow(
+                req_id=1,
+                row=RowRef(slot=0, generation=0),
+                prompt_tokens=(100, 101, 102),
+                positions=(0, 1, 2),
+                max_new_tokens=4,
+                temperature=1.0,
+                top_p=0.9,
+            ),
+        ),
+    )
+    tokens = set()
+    for _ in range(20):
+        be._reset()
+        res = be.execute(plan, StateStore(1, 100))
+        tokens.update(res[0].tokens)
+    # top_p=0.9 keeps the two dominant tokens only
+    assert tokens <= {104, 105}

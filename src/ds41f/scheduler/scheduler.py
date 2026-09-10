@@ -22,6 +22,8 @@ class PlanRow:
     prompt_tokens: tuple[int, ...]
     positions: tuple[int, ...]  # absolute positions this step consumes
     max_new_tokens: int = 0  # prefill window sizing
+    temperature: float = 0.0  # 0 = greedy
+    top_p: float = 1.0
     # VL inputs (image spans must lie inside the first prefill chunk; the reference
     # model takes images + token_types on the start_pos==0 forward only)
     token_types: tuple[int, ...] | None = None
@@ -104,6 +106,8 @@ class StaticCohortScheduler:
                     req.prompt_tokens,
                     tuple(range(len(req.prompt_tokens))),
                     max_new_tokens=req.params.max_new_tokens,
+                    temperature=req.params.temperature,
+                    top_p=req.params.top_p,
                 )
             )
         return StepPlan(ordinal=0, op="prefill", rows=tuple(rows))
@@ -112,6 +116,15 @@ class StaticCohortScheduler:
         rows = []
         for slot, req in sorted(active.items()):
             pos = len(req.prompt_tokens) + len(req.completion)
-            rows.append(PlanRow(req.req_id, req.row_ref, (), (pos,)))
+            rows.append(
+                PlanRow(
+                    req.req_id,
+                    req.row_ref,
+                    (),
+                    (pos,),
+                    temperature=req.params.temperature,
+                    top_p=req.params.top_p,
+                )
+            )
         return StepPlan(ordinal=0, op="decode", rows=tuple(rows))
 
