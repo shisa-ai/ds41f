@@ -49,7 +49,12 @@ class LLMEngine:
         # next prefill executes -- the one window where the drained rows' caches are
         # still intact for snapshot capture
         self.on_drain = None
+        # on_finish(req, row_index) fires when a request finishes, at the exact
+        # boundary its caches represent -- the only correct snapshot point. The
+        # engine must not block: slow callbacks delay the whole cohort.
+        self.on_finish = None
         self._last_cohort: list = []
+        self._dead = threading.Event()
 
     # -- public API --------------------------------------------------------
 
@@ -61,6 +66,8 @@ class LLMEngine:
 
     def submit(self, prompt_tokens: Sequence[int], params: Optional[SamplingParams] = None) -> RequestHandle:
         params = params or SamplingParams()
+        if self._dead.is_set():
+            raise RuntimeError("engine failed; restart required")
         if len(self._waiting) >= self.config.max_pending_requests:
             raise OverloadedError("waiting queue is full")
         req = _Request(prompt_tokens, params)
@@ -90,7 +97,23 @@ class LLMEngine:
     # -- engine thread ------------------------------------------------------
 
     def _run(self) -> None:
+        try:
+            self._run_inner()
+        except BaseException:
+            # the single execution owner died (backend/collective failure): close
+            # admission and fail every outstanding handle exactly once. Do not let
+            # new work enter a dead engine.
+            self._dead.set()
+            self._stopped.set()
+            for req in list(self._active.values()) + list(self._waiting):
+                if not req.done:
+                    self._finish(req, FinishReason.CANCELLED)
+            raise
+
+    def _run_inner(self) -> None:
         while True:
+            if self._dead.is_set():
+                return
             self._drain_control()
             if self._stopped.is_set():
                 break
@@ -165,16 +188,27 @@ class LLMEngine:
         # Stage A: the row stays in the fixed cohort (the reference batch and its
         # collectives cannot shrink mid-flight). The scheduler releases all rows
         # when the cohort drains; a cancelled row is simply a non-emitting row.
-        # When this was the cohort's last unfinished row, snapshot it BEFORE the
-        # terminal event is queued: the client can submit its next request the
-        # moment it reads the terminal, and that request's prefix lookup must
-        # already see this conversation's snapshot.
+        # When this was the cohort's last unfinished row, drain-capture fires
+        # BEFORE the terminal event is queued (the client's next lookup must see it).
+        if self.on_finish is not None:
+            try:
+                row_index = self._last_cohort.index(req) if req in self._last_cohort else None
+            except ValueError:
+                row_index = None
+            if row_index is not None:
+                self.on_finish(req, row_index)
         if self._last_cohort and all(
             getattr(r, "done", False) for r in self._last_cohort
         ):
             if self.on_drain is not None:
                 self.on_drain(self._last_cohort)
             self._last_cohort = []
+        # Per-request finish capture at the EXACT boundary the caches represent
+        # (prompt + completion[:-1]: the final sampled token is not yet consumed by
+        # the model). row_index = the request's batch position (its model cache row).
+        # A finished row's caches keep advancing with cohort filler afterwards, so
+        # this is the only correct snapshot point.
+
         handle = RequestHandle(req)
         handle._emit(
             TerminalEvent(finish, len(req.prompt_tokens), len(req.completion))

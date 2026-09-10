@@ -128,14 +128,26 @@ class RequestHandle:
             tokens.append(ev.token)
 
     def _emit(self, event) -> None:
-        """Engine-side delivery. Bounded: a stalled reader cancels only this request."""
+        """Engine-side delivery. Never blocks the driver: token events are dropped
+        into a full mailbox by cancelling the request (the reader is stalled or gone);
+        the terminal is then delivered into the drained mailbox. One terminal, always
+        last -- the drained tokens were discarded, which a stalled/gone reader cannot
+        observe anyway."""
         r = self._r
         try:
-            r.mailbox.put(event, timeout=5.0)
+            r.mailbox.put_nowait(event)
         except Full:
-            self.cancel()
-            r.finish_reason = FinishReason.BACKPRESSURE
-            r.mailbox.put(TerminalEvent(FinishReason.BACKPRESSURE, len(r.prompt_tokens), len(r.completion)))
+            if isinstance(event, TerminalEvent):
+                # drain queued tokens, then guarantee terminal delivery
+                while True:
+                    try:
+                        r.mailbox.get_nowait()
+                    except Exception:
+                        break
+                r.mailbox.put(event)
+            else:
+                self.cancel()
+                r.finish_reason = FinishReason.BACKPRESSURE
 
 
 @dataclass

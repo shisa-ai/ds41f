@@ -163,15 +163,15 @@ class ReferenceBackend:
         row = logits[i].float()
         if temperature <= 0:
             return int(row.argmax().item())
+        row = row / temperature  # scale once; filtering and sampling share these logits
         if top_p < 1.0:
             sorted_logits, idx = row.sort(descending=True)
-            cum = torch.softmax(sorted_logits / temperature, -1).cumsum(-1)
-            keep = cum - torch.softmax(sorted_logits / temperature, -1) < top_p
+            cum = torch.softmax(sorted_logits, -1).cumsum(-1)
+            keep = cum - torch.softmax(sorted_logits, -1) < top_p
             keep[0] = True
-            row = torch.full_like(row, float("-inf"))
-            row[idx[keep]] = sorted_logits[keep]
-        else:
-            row = row / temperature
+            filtered = torch.full_like(row, float("-inf"))
+            filtered[idx[keep]] = sorted_logits[keep]
+            row = filtered
         probs = torch.softmax(row, -1)
         return int(probs.div(torch.empty_like(probs).exponential_(1)).argmax().item())
 
