@@ -42,9 +42,9 @@ class StaticCohortScheduler:
     """Length-bucketed static cohorts.
 
     When no rows are active, admits up to `max_active_sequences` waiting requests
-    whose prompt lengths are within `cohort_bucket_tolerance` of the head request's
-    length (unequal prompts are expensive under the reference's shortest-first
-    prefill). While rows are active, plans a decode step over exactly those rows.
+    whose prompt lengths all lie inside one symmetric relative spread of each other
+    (unequal prompts are expensive under the reference's shortest-first prefill).
+    While rows are active, plans a decode step over exactly those rows.
     """
 
     def __init__(self, config: EngineConfig, state: StateStore):
@@ -76,7 +76,6 @@ class StaticCohortScheduler:
         """Pop admitted requests from `waiting`, publish their slots, return the plan."""
         if not waiting:
             return None
-        head = waiting[0]
         tolerance = 1.0 + self.config.cohort_bucket_tolerance
         cohort: list[_Request] = []
         # scan the queue in order; pop candidates, keep the cohort length-similar
@@ -85,20 +84,33 @@ class StaticCohortScheduler:
             candidates.append(waiting.popleft())
         stop = False
         requeue: list[_Request] = []
+        # prompt-length span of the admitted cohort; the backend bulk-prefills the
+        # shortest prompt and consumes longer tails one token per step, so cost is
+        # driven by (longest - shortest) and the bound must be symmetric
+        lo = hi = 0
         for req in candidates:
-            if stop or (
-                cohort and len(req.prompt_tokens) > tolerance * len(head.prompt_tokens)
-            ):
-                stop = True  # too long for this cohort; it and everything after stay queued
+            length = len(req.prompt_tokens)
+            if stop:
                 requeue.append(req)
                 continue
-            if not self.state.can_admit(len(req.prompt_tokens), req.params.max_new_tokens):
+            if cohort and max(hi, length) > tolerance * min(lo, length):
+                # both a too-long and a too-short prompt break the shortest-first
+                # prefill economics; requeue either one
+                requeue.append(req)
+                if length > hi:
+                    stop = True  # queue lengths are ordered; later rows are longer still
+                continue
+            if not self.state.can_admit(length, req.params.max_new_tokens):
                 requeue.append(req)  # over context budget: requeue, never admit partially
                 continue
             if req.exclusive and cohort:
                 requeue.append(req)  # exclusive rows run alone; wait for the next cohort
                 continue
             cohort.append(req)
+            if len(cohort) == 1:
+                lo = hi = length
+            else:
+                lo, hi = min(lo, length), max(hi, length)
             if req.exclusive:
                 stop = True  # nothing else may join an exclusive row's cohort
         if requeue:

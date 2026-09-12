@@ -169,3 +169,140 @@ def test_per_row_sampling_temperature_falls_in_top_p_support():
         tokens.update(res[0].tokens)
     # top_p=0.9 keeps the two dominant tokens only
     assert tokens <= {104, 105}
+
+
+class RecordingModel(StubModel):
+    """StubModel that records every forward call for the chunked-suffix test."""
+
+    def __init__(self):
+        self.calls = []
+
+    def forward(self, input_ids, start_pos, images=None, token_types=None):
+        self.calls.append((start_pos, tuple(input_ids[0].tolist())))
+        return super().forward(input_ids, start_pos, images, token_types)
+
+
+def test_prefix_hit_chunked_suffix_single_forward():
+    """A prefix-hit row with a multi-token suffix consumes the whole suffix in ONE
+    chunked forward (start_pos=shared, seqlen=suffix) and emits its first token
+    from that forward's prediction; the cursor then sits at the prompt end."""
+    model = RecordingModel()
+    be = ReferenceBackend(model, eos_token_id=500)
+    prompt = tuple(100 + j for j in range(8))
+    restored = []
+
+    class Meta:
+        prefix_hit = True
+        shared_len = 3
+
+        def restore(self):
+            restored.append(True)
+
+    row = PlanRow(
+        req_id=1,
+        row=RowRef(slot=0, generation=0),
+        prompt_tokens=prompt,
+        positions=tuple(range(8)),
+        max_new_tokens=5,
+        meta=Meta(),
+    )
+    plan = StepPlan(ordinal=0, op="prefill", rows=(row,))
+    res = be.execute(plan, StateStore(1, 100))
+    assert restored == [True]
+    # one chunked forward: suffix tokens 103..107 consumed at start_pos 3
+    assert model.calls == [(3, tuple(range(103, 108)))]
+    # the prediction for the last prompt token (107 -> 108) emits immediately
+    assert res[0].tokens == (108,)
+    # the next decode step continues from the prompt end, not the shared boundary
+    be.execute(make_decode((row,)), StateStore(1, 100))
+    assert model.calls[-1][0] == 8
+
+
+def test_prefix_hit_single_token_suffix_stays_on_decode():
+    """A one-token suffix must not run a seqlen==1 'chunked' forward (the model's
+    chunked branch requires seqlen > 1); it stays on the ordinary decode path."""
+    model = RecordingModel()
+    be = ReferenceBackend(model, eos_token_id=500)
+    prompt = tuple(100 + j for j in range(4))
+    class Meta:
+        prefix_hit = True
+        shared_len = 3
+
+        def restore(self):
+            pass
+
+    row = PlanRow(
+        req_id=1,
+        row=RowRef(slot=0, generation=0),
+        prompt_tokens=prompt,
+        positions=tuple(range(4)),
+        max_new_tokens=3,
+        meta=Meta(),
+    )
+    plan = StepPlan(ordinal=0, op="prefill", rows=(row,))
+    res = be.execute(plan, StateStore(1, 100))
+    assert res[0].tokens == ()  # nothing emitted by the snapshot prefill
+    assert model.calls == []  # no forward yet: the first decode consumes it
+    res = be.execute(make_decode((row,)), StateStore(1, 100))
+    assert model.calls == [(3, (103,))]  # single-token decode at the boundary
+
+
+class RowLogitsStubModel:
+    """logits depend on the row index: row b has argmax 100+b and runner-up 200+b."""
+
+    def forward(self, input_ids, start_pos, images=None, token_types=None):
+        import torch
+
+        B = input_ids.shape[0]
+        V = 1000
+        out = (input_ids[:, -1] + 1) % 1000
+        logits = torch.full((B, V), -50.0)
+        for b in range(B):
+            logits[b, 100 + b] = 10.0
+            logits[b, 200 + b] = 9.0
+        return out, logits, None
+
+
+def _mixed_params_rows(top_p_row1):
+    return (
+        PlanRow(1, RowRef(slot=0, generation=0), (100, 101, 102), (0, 1, 2), max_new_tokens=4, temperature=0.0, top_p=1.0),
+        PlanRow(2, RowRef(slot=1, generation=0), (100, 101, 102), (0, 1, 2), max_new_tokens=4, temperature=1.0, top_p=top_p_row1),
+        PlanRow(3, RowRef(slot=2, generation=0), (100, 101, 102), (0, 1, 2), max_new_tokens=4, temperature=0.0, top_p=1.0),
+    )
+
+
+def test_batched_sampling_mixes_greedy_and_top_p_per_row():
+    """One batched call keeps per-row parameters: greedy rows take their own
+    argmax, the top-p row is restricted to its nucleus, results stay in row order."""
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    plan = StepPlan(ordinal=0, op="prefill", rows=_mixed_params_rows(top_p_row1=0.5))
+    res = be.execute(plan, StateStore(3, 100))
+    # row 1 has nucleus {101} at top_p=0.5; rows 0/2 are greedy on their own argmax
+    assert [r.tokens for r in res] == [(100,), (101,), (102,)]
+
+
+def test_batched_sampling_top_p_support_is_per_row():
+    """With a wider nucleus the stochastic row may take its runner-up, but never a
+    token outside the two dominant ones; the greedy rows stay exact."""
+    import torch
+
+    torch.manual_seed(0)
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    plan = StepPlan(ordinal=0, op="prefill", rows=_mixed_params_rows(top_p_row1=0.9))
+    seen = set()
+    for _ in range(30):
+        be._reset()
+        res = be.execute(plan, StateStore(3, 100))
+        assert res[0].tokens == (100,) and res[2].tokens == (102,)
+        seen.add(res[1].tokens[0])
+    assert seen <= {101, 201}
+
+
+def test_batched_sampling_writes_next_ids_on_device():
+    """The sampled ids are written back into the token buffer for the next step in
+    one indexed device write, and the buffer matches the emitted tokens."""
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    plan = StepPlan(ordinal=0, op="prefill", rows=_mixed_params_rows(top_p_row1=0.5))
+    be.execute(plan, StateStore(3, 100))
+    # positions 0..2 are the prompt; position 3 is the sampled continuation
+    assert be._tokens[:, 3].tolist() == [100, 101, 102]

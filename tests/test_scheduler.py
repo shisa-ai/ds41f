@@ -34,6 +34,33 @@ def test_length_bucketing_keeps_cohort_similar():
     assert len(waiting) == 1 and len(waiting[0].prompt_tokens) == 400
 
 
+def test_length_bucketing_is_symmetric_in_queue_order():
+    """A long head must not pull in a much shorter prompt, and vice versa: the
+    reference bulk-prefills the shortest row and consumes longer tails one token
+    per step, so the cost is the cohort's longest-shortest spread."""
+    for specs in ([[1] * 8192, [1] * 512], [[1] * 512, [1] * 8192]):
+        s = StateStore(max_rows=8, max_context_tokens=1_000_000)
+        sched = StaticCohortScheduler(EngineConfig(max_active_sequences=8), s)
+        waiting, active = deque(make_requests(specs)), {}
+        plan = sched.next_plan(waiting, active)
+        # only the head is admitted; the mismatched row stays queued
+        assert len(plan.rows) == 1
+        assert len(waiting) == 1
+
+
+def test_length_bucketing_admits_short_prompt_after_rejecting_long_head():
+    """A too-short candidate is skipped, not treated as a stop, so a later row that
+    matches the head can still join the cohort."""
+    s = StateStore(max_rows=8, max_context_tokens=100_000)
+    sched = StaticCohortScheduler(EngineConfig(max_active_sequences=8), s)
+    waiting = deque(make_requests([[1] * 1000, [1] * 50, [1] * 1050]))
+    active = {}
+    plan = sched.next_plan(waiting, active)
+    admitted = sorted(len(r.prompt_tokens) for r in plan.rows)
+    assert admitted == [1000, 1050]
+    assert [len(r.prompt_tokens) for r in waiting] == [50]
+
+
 def test_over_budget_request_is_requeued_not_admitted():
     s = StateStore(max_rows=4, max_context_tokens=20)
     sched = StaticCohortScheduler(EngineConfig(), s)
