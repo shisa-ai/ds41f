@@ -76,9 +76,18 @@ class LLMEngine:
         # the key names the prefix the snapshot is valid for, so the used region is
         # unchanged -- but that is an argument, not a measurement, until
         # serve/check_pipeline_parity.py runs on real weights).
-        self._pipeline = bool(int(os.environ.get("DS41F_PIPELINE", "0"))) and hasattr(
-            backend, "enqueue"
-        )
+        self._pipeline = bool(int(os.environ.get("DS41F_PIPELINE", "0")))
+        if self._pipeline and not hasattr(backend, "enqueue"):
+            # An explicit opt-in that cannot be honoured must fail here, not quietly run
+            # the serial loop. That is exactly what happened the first time this was
+            # measured: the served path wraps the backend in a VL adapter that only
+            # exposed execute(), so DS41F_PIPELINE=1 ran the serial path and the
+            # A/B compared the serial path against itself.
+            raise RuntimeError(
+                f"DS41F_PIPELINE=1 needs a backend with enqueue()/resolve(); "
+                f"{type(backend).__name__} only has execute(). A wrapper around a "
+                f"split backend must forward both."
+            )
         self._thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
         # on_drain(cohort_requests) fires after a cohort fully drains and before the
@@ -247,6 +256,18 @@ class LLMEngine:
         if hasattr(self.backend, "enqueue"):
             return self.backend.enqueue(plan, self.state)
         return self.backend.execute(plan, self.state)
+
+    def settings(self) -> dict:
+        """The behaviour-affecting settings this engine resolved from the environment.
+
+        Printed at server startup so an opt-in that silently did not take effect is
+        visible in the log rather than inferred from a measurement that looks wrong.
+        """
+        return {
+            "pipeline": self._pipeline,
+            "admit_window_ms": round(self._admit_window_s * 1000, 3),
+            "split_backend": hasattr(self.backend, "enqueue"),
+        }
 
     def _resolve(self, staged):
         if hasattr(self.backend, "resolve"):

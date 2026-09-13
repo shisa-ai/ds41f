@@ -228,13 +228,15 @@ def test_the_pipeline_flag_actually_selects_the_pipelined_loop(monkeypatch):
     for value, expected in (("0", False), ("1", True)):
         monkeypatch.setenv("DS41F_PIPELINE", value)
         assert LE(FB(), EC())._pipeline is expected
-    # a backend that has no split contract cannot be pipelined
+    # a backend with no split contract must refuse the flag rather than quietly
+    # running the serial loop, which is how a first A/B compared serial to serial
     class OnlyExecute:
         def execute(self, plan, state):
             return []
 
     monkeypatch.setenv("DS41F_PIPELINE", "1")
-    assert LE(OnlyExecute(), EC())._pipeline is False
+    with pytest.raises(RuntimeError, match="enqueue"):
+        LE(OnlyExecute(), EC())
 
 
 def test_pipelined_delivery_is_token_identical_to_serial(monkeypatch):
