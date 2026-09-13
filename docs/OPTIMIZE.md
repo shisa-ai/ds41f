@@ -190,13 +190,24 @@ in dispatch order; registration does not prove which handles each call.
 **Priority rationale:** a bounded transport experiment before an EP/pipeline
 rewrite. Re-profile after MoE changes because they alter collective waiting.
 
-**Status (September 13).** Measured in [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#collectives).
-Custom allreduce is CUDA-graph-capturable under vLLM's supported capture
-procedure and is 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is
-1.2-1.3x faster than eager NCCL there and no faster at prefill sizes. Both decline
-or are unsupported at prefill sizes. The remaining open item is the end-to-end
-gain under real rank skew and concurrency: no backend has been switched in the
-engine.
+**Status (September 13).** Measured in [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#collectives),
+and the decode backend is now switchable. Custom allreduce is
+CUDA-graph-capturable under vLLM's supported capture procedure and is 1.3-1.6x
+faster than graphed NCCL at decode sizes; routed through the engine behind
+`DSV41F_CUSTOM_AR=1 DSV41F_EXPANDABLE_SEGMENTS=0` it takes the served decode step
+from 29.0 to 27.6 ms (4.8%), with every call site agreeing with NCCL to 1.9e-06.
+It stays opt-in because it moves generated tokens on a near-tie-sensitive model.
+FlashInfer is 1.2-1.3x faster than eager NCCL at decode sizes, no faster at
+prefill sizes, and was not integrated. Both decline or are unsupported at prefill
+sizes, so prefill keeps NCCL.
+
+The two bugs that made an earlier pass call this a kernel-level failure were the
+caching allocator (graph-buffer registration cannot export expandable-segment
+memory) and a collective captured outside `CustomAllreduce.capture()`. Both are
+isolated by `inference/check_custom_ar_ipc.py` without loading the model.
+
+Still open under this heading: the gain has not been re-measured at concurrency
+2/4, where the step is batched and the collective competes with more work.
 
 ## 3. Qualify existing fusion and close graph/host gaps
 
