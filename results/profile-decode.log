@@ -1,0 +1,134 @@
+W0913 16:43:17.765000 1882324 site-packages/torch/distributed/run.py:982] 
+W0913 16:43:17.765000 1882324 site-packages/torch/distributed/run.py:982] *****************************************
+W0913 16:43:17.765000 1882324 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0913 16:43:17.765000 1882324 site-packages/torch/distributed/run.py:982] *****************************************
+/root/glm-testing/ds41f/inference/profile_decode.py:30: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode.py:30: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode.py:30: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode.py:30: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+  [placement] file=/root/glm-testing/ds41f/inference/expert_placement.pt sha256=e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030 layers=40 experts=384
+  [placement] layer 0 redistributed
+  [placement] layer 1 redistributed
+  [placement] layer 2 redistributed
+  [placement] layer 3 redistributed
+  [placement] layer 4 redistributed
+  [placement] layer 5 redistributed
+  [placement] layer 6 redistributed
+  [placement] layer 7 redistributed
+  [placement] layer 8 redistributed
+  [placement] layer 9 redistributed
+  [placement] layer 10 redistributed
+  [placement] layer 11 redistributed
+  [placement] layer 12 redistributed
+  [placement] layer 13 redistributed
+  [placement] layer 14 redistributed
+  [placement] layer 15 redistributed
+  [placement] layer 16 redistributed
+  [placement] layer 17 redistributed
+  [placement] layer 18 redistributed
+  [placement] layer 19 redistributed
+  [placement] layer 20 redistributed
+  [placement] layer 21 redistributed
+  [placement] layer 22 redistributed
+  [placement] layer 23 redistributed
+  [placement] layer 24 redistributed
+  [placement] layer 25 redistributed
+  [placement] layer 26 redistributed
+  [placement] layer 27 redistributed
+  [placement] layer 28 redistributed
+  [placement] layer 29 redistributed
+  [placement] layer 30 redistributed
+  [placement] layer 31 redistributed
+  [placement] layer 32 redistributed
+  [placement] layer 33 redistributed
+  [placement] layer 34 redistributed
+  [placement] layer 35 redistributed
+  [placement] layer 36 redistributed
+  [placement] layer 37 redistributed
+  [placement] layer 38 redistributed
+  [placement] layer 39 redistributed
+  [placement] applied /root/glm-testing/ds41f/inference/expert_placement.pt
+/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[ref] decode mean over 20 steps: 32.4 ms
+USDT:2026-09-13 16:44:39 1883055:1883055 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-13 16:44:39 1883056:1883056 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-13 16:44:40 1883053:1883053 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-13 16:44:40 1883054:1883054 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-13 16:44:40 1883055:1883055 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-13 16:44:40 1883056:1883056 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-13 16:44:40 1883053:1883053 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-13 16:44:40 1883054:1883054 SyncActivityProfilerHandler.cpp:46] profiler_stop
+
+===== top 25 by CUDA time (whole step) =====
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                                  Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                       fp8_gemv_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      63.607ms        12.33%      63.607ms      10.967us          5800  
+                                            sparse_attn_kernel__kernel         0.00%       0.000us         0.00%       0.000us       0.000us      54.806ms        10.63%      54.806ms      68.508us           800  
+ncclDevKernel_AllReduce_Sum_f32_RING_LL(ncclDevKernelArgsStorage<40...         0.00%       0.000us         0.00%       0.000us       0.000us      52.141ms        10.11%      52.141ms      32.588us          1600  
+                                                                  _w13         0.00%       0.000us         0.00%       0.000us       0.000us      47.236ms         9.16%      47.236ms      59.045us           800  
+void at::native::unrolled_elementwise_kernel<at::native::direct_cop...         0.00%       0.000us         0.00%       0.000us       0.000us      38.473ms         7.46%      38.473ms       2.888us         13320  
+                                                                   _w2         0.00%       0.000us         0.00%       0.000us       0.000us      35.379ms         6.86%      35.379ms      44.223us           800  
+                                              act_quant_kernel__kernel         0.00%       0.000us         0.00%       0.000us       0.000us      20.989ms         4.07%      20.989ms       2.560us          8200  
+void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, ...         0.00%       0.000us         0.00%       0.000us       0.000us      13.667ms         2.65%      13.667ms       2.733us          5000  
+void at::native::unrolled_elementwise_kernel<at::native::BinaryFunc...         0.00%       0.000us         0.00%       0.000us       0.000us      12.285ms         2.38%      12.285ms       3.700us          3320  
+void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_...         0.00%       0.000us         0.00%       0.000us       0.000us      11.981ms         2.32%      11.981ms       3.744us          3200  
+void at::native::vectorized_elementwise_kernel<8, at::native::bfloa...         0.00%       0.000us         0.00%       0.000us       0.000us      11.815ms         2.29%      11.815ms       1.103us         10710  
+void at::native::reduce_kernel<128, 4, at::native::ReduceOp<float, ...         0.00%       0.000us         0.00%       0.000us       0.000us      11.117ms         2.16%      11.117ms       3.421us          3250  
+void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_...         0.00%       0.000us         0.00%       0.000us       0.000us      10.718ms         2.08%      10.718ms       1.452us          7380  
+ncclDevKernel_AllReduce_Sum_bf16_RING_LL(ncclDevKernelArgsStorage<4...         0.00%       0.000us         0.00%       0.000us       0.000us       9.106ms         1.77%       9.106ms      41.390us           220  
+                                                      c10d::allreduce_         0.27%       1.542ms         1.71%       9.569ms     119.613us       0.000us         0.00%       8.526ms     106.575us            80  
+                                                    record_param_comms         1.09%       6.106ms         1.43%       8.027ms     100.342us       8.526ms         1.65%       8.526ms     106.575us            80  
+                                                       nccl:all_reduce         0.00%       0.000us         0.00%       0.000us       0.000us       8.526ms         1.65%       8.526ms     106.575us            80  
+                                nvjet_sm90_tst_64x8_64x16_4x1_v_bz_TNT         0.00%       0.000us         0.00%       0.000us       0.000us       6.983ms         1.35%       6.983ms       8.728us           800  
+                                      hc_split_sinkhorn_kernel__kernel         0.00%       0.000us         0.00%       0.000us       0.000us       6.734ms         1.31%       6.734ms       4.209us          1600  
+void dot_kernel<float, 128, 0, cublasDotParams<cublasGemvTensorStri...         0.00%       0.000us         0.00%       0.000us       0.000us       6.437ms         1.25%       6.437ms       4.023us          1600  
+void at::native::vectorized_elementwise_kernel<4, at::native::CUDAF...         0.00%       0.000us         0.00%       0.000us       0.000us       5.926ms         1.15%       5.926ms       1.022us          5800  
+void at::native::sbtopk::gatherTopK<float, unsigned int, 1, false>(...         0.00%       0.000us         0.00%       0.000us       0.000us       5.724ms         1.11%       5.724ms       7.155us           800  
+void at::native::vectorized_elementwise_kernel<4, at::native::rsqrt...         0.00%       0.000us         0.00%       0.000us       0.000us       5.605ms         1.09%       5.605ms       1.121us          5000  
+void at::native::vectorized_elementwise_kernel<4, at::native::(anon...         0.00%       0.000us         0.00%       0.000us       0.000us       5.553ms         1.08%       5.553ms       1.111us          5000  
+void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_...         0.00%       0.000us         0.00%       0.000us       0.000us       4.700ms         0.91%       4.700ms       2.670us          1760  
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 560.794ms
+Self CUDA time total: 515.818ms
+
+
+===== top 25 by CPU time (whole step) =====
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                                  Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                              aten::to         0.19%       1.060ms        47.73%     267.646ms     188.483us       0.000us         0.00%       1.623ms       1.143us          1420  
+                                                           aten::copy_         1.10%       6.193ms        47.54%     266.591ms     201.963us       2.008ms         0.39%       2.018ms       1.529us          1320  
+                                                        aten::_to_copy         0.35%       1.935ms        47.54%     266.586ms     277.694us       0.000us         0.00%       1.623ms       1.691us           960  
+                                                       cudaMemcpyAsync        45.49%     255.081ms        45.72%     256.388ms     754.082us       0.000us         0.00%      10.240us       0.030us           340  
+                                                       cudaGraphLaunch        34.69%     194.521ms        35.31%     197.995ms       3.300ms       0.000us         0.00%     308.643us       5.144us            60  
+                                                      cudaLaunchKernel         3.48%      19.521ms         3.48%      19.521ms       4.457us       0.000us         0.00%       0.000us       0.000us          4380  
+                                                 cudaDeviceSynchronize         2.26%      12.649ms         2.27%      12.722ms       6.361ms       0.000us         0.00%       0.000us       0.000us             2  
+                                                      c10d::allreduce_         0.27%       1.542ms         1.71%       9.569ms     119.613us       0.000us         0.00%       8.526ms     106.575us            80  
+                                                    record_param_comms         1.09%       6.106ms         1.43%       8.027ms     100.342us       8.526ms         1.65%       8.526ms     106.575us            80  
+                                                             aten::mul         0.86%       4.795ms         1.42%       7.943ms      11.033us       1.219ms         0.24%       1.237ms       1.718us           720  
+                                                       nccl:all_reduce         0.00%       0.000us             0       6.666ms      83.324us       0.000us         0.00%       0.000us       0.000us            80  
+                                               Activity Buffer Request         0.90%       5.059ms         1.03%       5.752ms     639.071us       0.000us         0.00%      76.835us       8.537us             9  
+                                                           aten::where         0.23%       1.281ms         0.95%       5.325ms      26.625us     116.866us         0.02%     307.526us       1.538us           200  
+                                                   aten::empty_strided         0.73%       4.093ms         0.73%       4.093ms       3.411us       0.000us         0.00%       0.000us       0.000us          1200  
+                                                             aten::add         0.45%       2.510ms         0.69%       3.897ms      10.825us     334.051us         0.06%     334.051us       0.928us           360  
+                                                          Buffer Flush         0.62%       3.455ms         0.62%       3.455ms     493.577us       0.000us         0.00%       0.000us       0.000us             7  
+                                                          aten::square         0.08%     424.466us         0.58%       3.240ms      16.198us       0.000us         0.00%     206.273us       1.031us           200  
+                                                           aten::clone         0.06%     313.931us         0.55%       3.101ms      22.146us       0.000us         0.00%     129.058us       0.922us           140  
+                                                     aten::masked_fill         0.05%     296.445us         0.54%       3.043ms      38.037us       0.000us         0.00%     213.860us       2.673us            80  
+                                                            aten::mean         0.35%       1.955ms         0.51%       2.868ms      14.341us     635.718us         0.12%     635.718us       3.179us           200  
+                                                           aten::empty         0.51%       2.859ms         0.51%       2.859ms       3.107us       0.000us         0.00%       0.000us       0.000us           920  
+                                                             aten::pow         0.32%       1.819ms         0.50%       2.815ms      14.076us     206.273us         0.04%     206.273us       1.031us           200  
+                                                          aten::einsum         0.07%     368.342us         0.49%       2.732ms     136.617us       0.000us         0.00%     177.218us       8.861us            20  
+                                                          aten::__or__         0.04%     248.019us         0.43%       2.400ms      10.909us       0.000us         0.00%     238.048us       1.082us           220  
+                                                      aten::bitwise_or         0.22%       1.250ms         0.38%       2.152ms       9.781us     238.048us         0.05%     238.048us       1.082us           220  
+----------------------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 560.794ms
+Self CUDA time total: 515.818ms
+
+trace written to /data/ds41f/decode_trace_rank0.json

@@ -161,6 +161,18 @@ other supported production backends that cover our formats and shapes.
 **Priority rationale:** potentially large kernel gains with less new implementation
 than designing a weight layout and GEMM from scratch. Matched gains are unmeasured.
 
+**Status (September 13).** The MoE half is measured. Against vLLM's Marlin MXFP4
+kernels, under graph replay, at the real per-rank decode mix (one token, top-6 of
+384 global experts, 96 owned locally), Marlin is **2.80× faster** than the engine's
+grouped GEMV, averaged over 14 cases (2.3× with no active local expert, 3.2× with
+six). The engine's decode MoE is 4.13 ms/step, so the projected saving is about
+2.6 ms/step (8% of decode) if the ratio transfers. Not integrated: the engine
+quantizes activations to FP8 and Marlin uses bf16, so the paths are not
+numerically interchangeable. The `wo_a` half is measured and rejected — the FP8
+grouped GEMM is 1.4-7× slower than the bf16 `einsum` at every shape, and the bf16
+op is only 1.9% of a decode step to begin with. See [Optimization
+results](OPTIMIZE-RESULTS.md#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels).
+
 ## 2. Benchmark TP collectives and select the fastest qualified path
 
 Keep TP4 and compare NCCL with supported custom, FlashInfer and symmetric-memory
@@ -202,6 +214,20 @@ Then fuse measured expensive sequences: RMSNorm, RoPE/quantization/cache writes,
 SwiGLU/clipping/rounding and hyper-connections. Launch counts are diagnostics, not
 a promised ~100-to-26 target. Fusion is one lever alongside better kernels,
 allocation removal and host/device overlap.
+
+**Status (September 13).** The audit is done for B=1 at 2K context and it changes
+the shape of this section. The step is GPU-bound: the host enqueues a step in
+0.02 ms. It launches **6,232 kernels per step** with a median duration of 1.82 µs,
+and 43% of the kernel time sits in 5,731 elementwise, copy, reduce and activation
+quantization kernels; the five large groups (dense GEMV, sparse attention, both
+MoE projections, all-reduce) are 51% of the time in 501 launches. Decode is
+launch-count-bound, so fusion of the small kernels has the larger ceiling and
+single-kernel replacement has the smaller one. Separately, the per-step
+`torch.cuda.synchronize()` in the harness and the `sampled.tolist()` in
+`ReferenceBackend._collect` cost 2.8-3.1 ms/step (9%) and are removable — pipelined
+and synchronized decode produce identical tokens once prefill is deterministic —
+but the delivery path must enqueue step *i+1* before reading step *i*'s token. See
+[Decode step budget](OPTIMIZE-RESULTS.md#decode-step-budget).
 
 ## 4. Remove cohort waste and sampling synchronization
 

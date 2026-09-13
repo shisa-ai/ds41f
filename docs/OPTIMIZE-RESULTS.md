@@ -19,17 +19,22 @@ different protocol.
 
 Done and measured: the decode kernel work (FP8 GEMV, warp counts), the prefill
 MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
-the fused hyper-connection kernels, and two serving-path fixes (symmetric length
-bucketing, batched on-device sampling).
+the fused hyper-connection kernels, two serving-path fixes (symmetric length
+bucketing, batched on-device sampling), the packed token-broadcast protocol, a
+decode-step budget with its kernel/launch breakdown, the Marlin MXFP4 MoE
+comparison, and three measured-and-rejected candidates (`wo_a` in FP8, and the
+object-plus-tensor broadcast protocols the packed one replaced).
 
 Remaining work and follow-up status:
 
 | Item | State |
 | --- | --- |
-| Marlin / FP4-expert kernel comparison | Not attempted. The format qualification was part of the experiment, not a reason to call it complete. |
+| Marlin / FP4-expert kernel comparison | **Measured: 2.8× faster than the engine's grouped GEMV, graphed, at the real per-rank mix.** Not integrated; the two differ in activation precision (W4A16 vs the engine's W4A8), so a switch needs its own correctness gate. See [FP4 expert MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels). |
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
+| Per-step synchronization | Measured at 2.8-3.1 ms/step (9%). Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
+| Kernel launch count | Measured: 6,232 launches/step, median 1.82 µs, 46% of kernel time in small elementwise/copy/reduce kernels. No fusion implemented. See [Decode step budget](#decode-step-budget). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | Measured. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is 1.2-1.3x faster than eager NCCL there. An end-to-end gain is not established. See [Collectives](#collectives). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
@@ -117,6 +122,139 @@ ms/step when forced to 8). They are now separate
 (`DSV41F_W13_WARPS`, `DSV41F_W2_WARPS`, `DSV41F_MOE_WARPS` as fallback).
 
 Decode 36.3 → 32.7 ms/token.
+
+### Attention output projection (`wo_a`) in FP8: measured, not adopted
+
+`wo_a` is block-diagonal over `o_groups`, so the model runs a bf16 grouped
+`einsum("bsgd,grd->bsgr")`. vLLM keeps this weight in FP8 and runs a grouped FP8
+GEMM. `bench_wo_a.py` compares the two at the real per-rank shape (`o_groups`=2,
+`o_lora_rank`=1024, input 4096) against a float64 reference, eager and under
+graph replay. Weight quantization is an offline cost and is not timed; the
+per-forward activation quantization is.
+
+| Shape | bf16 einsum (graphed) | FP8 grouped GEMM (graphed) | FP8 speedup | bf16 max err | FP8 max err | ref absmax |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| decode, 1 token | 15.4 µs | 112.5 µs | 0.14× | 0.031 | 0.461 | 14.0 |
+| prefill, 512 | 84.6 µs | 177.0 µs | 0.48× | 0.031 | 0.626 | 15.3 |
+| prefill, 2048 | 290.4 µs | 407.4 µs | 0.71× | 0.032 | 0.656 | 17.9 |
+| prefill, 8192 | 1,007.9 µs | 1,448.7 µs | 0.70× | 0.058 | 0.643 | 17.3 |
+
+FP8 is **slower at every shape**, by 7× at decode. The halved weight traffic does
+not pay for the per-forward activation quantization plus the per-group
+`_scaled_mm` launches; the bf16 einsum at this size is launch-bound, not
+bandwidth-bound. The `einsum` also beats an explicit `bmm` reformulation
+(36.8 µs vs 55.6 µs eager at decode), so the current formulation is already the
+better bf16 one.
+
+The realistic ceiling was small to begin with: graphed bf16 `wo_a` is 15.4 µs per
+layer, or about 0.62 ms of a 32.4 ms decode step (1.9%) across 40 layers. vLLM's
+version fuses the activation quantization into the preceding inverse-RoPE kernel,
+which this isolated comparison does not; reproducing that is the real work, and
+it would have to overcome the same launch-bound shape. Not adopted.
+
+### FP4 expert MoE against vLLM's Marlin MXFP4 kernels
+
+`bench_marlin_moe.py` loads the shipped rank-0 shard's 96 local experts, repacks
+them with vLLM's own `prepare_moe_mxfp4_layer_for_marlin`, and times the engine's
+`GroupedMoE.forward` (W4A8 grouped GEMV) against `fused_marlin_moe` (W4A16
+Marlin) at the real per-rank decode shape: one token, top-6 of 384 global
+experts, 96 owned locally. Graph-replayed, because that is what the decode path
+pays:
+
+| Active local experts | Marlin | engine grouped GEMV | speedup |
+| ---: | ---: | ---: | ---: |
+| 0 | 12.4 µs | 29.0 µs | 2.3× |
+| 1 | 46.1 µs | 118.9 µs | 2.6× |
+| 2 | 51.1 µs | 145.5 µs | 2.8× |
+| 3 | 61.0 µs | 178.5 µs | 2.9× |
+| 6 | 94.8 µs | 303.0 µs | 3.2× |
+| mean, 14 cases with ≥1 local | 56.0 µs | 158.8 µs | **2.80×** |
+
+Each number is the whole MoE block (both projections, SwiGLU clamp, both
+activation quantizations), not one kernel. Eager, Marlin sits at a flat ~149 µs
+for every row including the 0-local case, because `moe_align_block_size` and the
+intermediate-cache allocations dominate; under replay that host cost disappears
+and the device-side block count skips the empty experts. Only the graphed column
+is comparable to the engine's decode step.
+
+The engine's decode MoE is `_w13` + `_w2` = 4.13 ms/step, 12.7% of the step. At
+the 2.8× ratio that would fall to about 1.5 ms/step, saving roughly 2.6 ms/step
+(8% of decode). That projection assumes the ratio transfers from this isolated
+harness to the in-graph path; it is not an end-to-end measurement.
+
+**The two are not numerically interchangeable.** Against the eager per-expert
+reference, the engine's grouped path is bit-identical (max abs 0.0, NRMSE 0.0) —
+both quantize activations to FP8 (`linear()` calls `act_quant` for fp4 weights
+too). Marlin differs from that reference by 0.03-0.22 max abs and **4.2-5.3%
+NRMSE**. That gap is consistent with Marlin computing in bf16 activations while
+the reference is FP8, so this does not show Marlin is less accurate — it shows the
+engine's own activation quantization is the difference. Switching would still
+need its own correctness gate, because it changes the numerics of every routed
+expert.
+
+## Decode step budget
+
+A 20-step CUDA/CPU profile of the B=1 decode step at 2K context
+(`profile_decode.py`, `results/profile-decode.log`) accounts for the 32.4 ms
+published latency. The step is **GPU-bound**: the host enqueues a step in
+0.02 ms, and the CUDA kernels plus their inter-kernel gaps fill the whole step.
+
+Kernel time, grouped from the trace (6,232 launches per step, 25.77 ms of kernel
+execution per step):
+
+| Kernel group | ms/step | share of kernel time | launches/step |
+| --- | ---: | ---: | ---: |
+| elementwise, copy and reduce kernels | 9.97 | 38.7% | 4,938 |
+| dense FP8 GEMV (`fp8_gemv_kernel`) | 3.18 | 12.3% | 290 |
+| NCCL all-reduce (f32 + bf16) | 3.06 | 11.9% | 91 |
+| sparse attention | 2.74 | 10.6% | 40 |
+| MoE gate+up (`_w13`) | 2.36 | 9.2% | 40 |
+| MoE down (`_w2`) | 1.77 | 6.9% | 40 |
+| activation quantization (`act_quant_kernel`) | 1.05 | 4.1% | 410 |
+| other GEMMs (`nvjet`, `cutlass`) | 0.43 | 1.7% | 60 |
+| radix/bitonic sorts | 0.39 | 1.5% | 49 |
+| remainder | 0.41 | 1.6% | 227 |
+
+The median kernel in a decode step runs for **1.82 µs**; the 90th percentile is
+6.37 µs. The five large groups (dense GEMV, sparse attention, MoE gate+up, MoE
+down and NCCL all-reduce) are 51% of the kernel time in 501 of the 6,232
+launches. The other 5,731 launches are elementwise, copy, reduce and activation
+quantization kernels worth 43% of the time. **Decode is launch-count-bound, not
+bandwidth-bound**, which is why replacing one large kernel with a faster
+equivalent of the same shape has a small ceiling, while fusing the small kernels
+does not.
+
+### The per-step synchronization costs 2.8-3.1 ms
+
+`benchmark_ds41f.py` calls `torch.cuda.synchronize()` inside the decode loop, and
+`ReferenceBackend._collect` calls `sampled.tolist()` on every step to deliver the
+token. Both drain the pipeline before the next step is enqueued.
+
+`probe_decode_cpu.py --mode pipe|sync` measures the same 30 decode steps from
+identical state with and without that drain, one mode per process:
+
+| Mode | enqueue | kernel span | wall |
+| --- | ---: | ---: | ---: |
+| pipelined (no per-step sync) | 0.018 ms | 29.5 ms | **29.6 ms** |
+| synchronized each step | 0.021 ms | 32.3 ms | **32.4 ms** |
+
+The drain costs **2.8-3.1 ms/step, about 9%**, and it is not required for
+correctness: with the deterministic prefill (`DSV41F_PF_FIXED_ORDER=1`) both modes
+produce byte-identical token sequences from the same start state, including the
+10-step warm-up before the measured window.
+
+The comparison only holds under that flag. With the default nondeterministic
+prefill, two runs of the *same* mode already differ from each other (the grouped
+prefill's `atomic_add` reduction), so token equality across modes is not evidence
+about pipelining until prefill is made deterministic. That confound produced a
+wrong first reading of this measurement; it is recorded here so the check is not
+repeated without the flag.
+
+The step budget therefore reads: 25.8 ms of kernel execution, roughly 3.7 ms of
+inter-kernel gaps inside the graph replays, and 2.8-3.1 ms of exposed
+synchronization. The synchronization is the only part that is pure host-side loss,
+and recovering it needs the delivery path to read a token from step *i* after
+enqueueing step *i+1*, not before.
 
 ## Prefill changes
 
@@ -431,6 +569,24 @@ atomic path**, or quality on representative natural-generation prompts.
 Random-token prompts are not a quality test, and no held-out task evaluation was
 run. Those are the missing evidence the correctness gates in OPTIMIZE.md ask for.
 
+The measurements added in this pass carry their own limits, stated where they
+appear and repeated here so they are not read as end-to-end results:
+
+- The [decode step budget](#decode-step-budget) and its pipelined-versus-
+synchronized comparison are B=1 at 2K context on the model-only path. They exclude
+HTTP, sampling delivery and any batch size above one. The pipelining result only
+holds with `DSV41F_PF_FIXED_ORDER=1`; without it the prefill is nondeterministic
+and no cross-run token comparison is meaningful.
+- The [Marlin comparison](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels) is
+an isolated one-layer harness on one GPU, not the engine's in-graph path, and the
+projected 2.6 ms/step saving is an extrapolation from the measured kernel ratio.
+Its accuracy column compares against the engine's own W4A8 reference, not against
+a float64 ground truth, so it does not rank the two paths by accuracy.
+- The [`wo_a` comparison](#attention-output-projection-wo_a-in-fp8-measured-not-adopted)
+measures the op in isolation with an unfused activation quantization, which is
+more pessimistic than vLLM's fused path. It bounds the shape's headroom, not
+vLLM's implementation.
+
 ## Engram lookup cost
 
 With `DSV41F_ENGRAM_OFFLOAD=1` the two n-gram tables are CPU-resident, so every
@@ -561,10 +717,28 @@ experts. A recorded example is `results/manifest-shipped.json`
   `[length, topk, dim]` buffer) is bit-identical across runs at 2048 and 8192, at
   +1.4-2.0% prefill time and no extra peak memory. It is not wired into the
   engine. See [Noise floor](#noise-floor).
-- **Marlin kernel comparison (OPTIMIZE.md section 1).** Not attempted. It needs
-  the vLLM Marlin kernels vendored and qualified against E2M1/E8M0 semantics.
-  The FP8 GEMV/GEMM comparison in [Decode changes](#decode-changes) is a different
-  experiment and does not stand in for it.
+- **Marlin kernel comparison (OPTIMIZE.md section 1).** Measured: 2.8× faster
+  than the engine's grouped GEMV under graph replay at the real per-rank mix
+  (one token, top-6 of 384 global experts, 96 owned locally), 2.3× at 0 active
+  local experts up to 3.2× at 6. `bench_marlin_moe.py` loads the shipped shard's
+  96 local experts and repacks them with vLLM's own
+  `prepare_moe_mxfp4_layer_for_marlin`. Not integrated. The engine quantizes
+  activations to FP8 and Marlin does not, so the two are not numerically
+  interchangeable and a switch needs its own correctness gate. See [FP4 expert
+  MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels).
+- **Per-step synchronization (OPTIMIZE.md section 3).** Measured at 2.8-3.1 ms/step
+  (9%) and shown to be removable without changing tokens when prefill is
+  deterministic, but not removed. The fix belongs in the delivery path: enqueue
+  step *i+1* before reading step *i*'s sampled token, rather than syncing to read
+  it first. `benchmark_ds41f.py` and `ReferenceBackend._collect` both drain per
+  step today.
+- **Kernel launch count (OPTIMIZE.md section 3).** Measured: 6,232 launches per
+  decode step, median 1.82 µs, with 46% of kernel time in 5,772 small
+  elementwise/copy/reduce kernels. No fusion implemented. This is the largest
+  measured structural target in the decode step and it is not what the
+  single-kernel replacements in items 2-4 address.
+- **`wo_a` in FP8.** Measured and rejected: 1.4-7x slower than the bf16 grouped
+  einsum at every decode and prefill shape. See [Decode changes](#decode-changes).
 - **Engram lookup cost (section 6).** Measured, not optimised. It exposes 0.45 ms
   per decode step (1.4%). The graphed decode wrapper still executes Engram outside
   replay with a synchronous index transfer to CPU and a CPU gather/dequantize; the
@@ -631,6 +805,23 @@ $PY --nproc-per-node 4 profile_decode.py
 $PY --nproc-per-node 4 profile_prefill_ops.py
 $PY --nproc-per-node 4 diag_balance.py
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 profile_engram.py
+
+# decode step budget: pipelined vs per-step-synchronized decode, one mode per
+# process so both start from identical state. Add DSV41F_PF_FIXED_ORDER=1 for a
+# deterministic prefill; without it two runs of the *same* mode already differ,
+# so token equality across modes says nothing about pipelining.
+for m in pipe sync; do DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 \
+  probe_decode_cpu.py --mode $m; done
+
+# isolated wo_a comparison (bf16 grouped einsum vs FP8 grouped GEMM), one GPU
+CUDA_VISIBLE_DEVICES=0 python bench_wo_a.py --iters 200 --output /root/ds41f/results/wo-a.json
+
+# FP4 expert MoE against vLLM's Marlin MXFP4 kernels, one GPU. Needs the
+# vllm-ds41f env (for vLLM) and its libstdc++ on LD_LIBRARY_PATH; the ds41f env
+# lacks the vLLM dependencies. Loads the rank-0 shard's 96 local experts.
+LD_LIBRARY_PATH=/root/miniforge3/envs/vllm-ds41f/lib:$LD_LIBRARY_PATH \
+  CUDA_VISIBLE_DEVICES=0 /root/miniforge3/envs/vllm-ds41f/bin/python \
+  bench_marlin_moe.py --iters 100 --output /root/ds41f/results/marlin-moe.json
 
 # collectives; --custom measures vLLM's custom allreduce, --flashinfer measures
 # FlashInfer. Both need the vllm-ds41f env and its libstdc++ on LD_LIBRARY_PATH
