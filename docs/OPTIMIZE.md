@@ -264,12 +264,37 @@ Two findings from that pass constrain the rest of the section:
   one-kernel variant is 2.97% faster and is off by default at ~5 differing bf16
   elements per million.
 
-Still unfused and named by this section: RoPE, the KV-cache writes, and
-`hc_mixes` at decode (its fused kernel is shaped one program per 64 tokens, so it
-needs a decode-shaped variant). The remaining small-kernel groups are 2,774
+Still unfused and named by this section: the KV-cache writes, and `hc_mixes` at
+decode (its fused kernel is shaped one program per 64 tokens, so it needs a
+decode-shaped variant). The remaining small-kernel groups are 2,774
 elementwise/copy/reduce plus 410 activation-quantization launches per step; the
 `act_quant` group is now the largest single fusion target at 1.05 ms/step. See
 [Decode kernel fusion](OPTIMIZE-RESULTS.md#decode-kernel-fusion).
+
+**Second fusion pass (September 14).** The rotary embedding is now fused too. It
+was the largest single unfused item in the step's op attribution -- 0.519 ms/step
+of `aten::copy_` plus 0.160 ms of `aten::mul` -- and a decode step calls it **198
+times**, each call three launches over a small tensor. `rope_kernels.py` does the
+cast, the complex multiply and the cast back in one launch, in place: **2.3% lower
+decode latency** (28.365 → 27.714 ms/step, two interleaved A/B runs, 3 and 4
+repeats) with **bit-identical decode logits and tokens**. See
+[Fused rotary embedding](OPTIMIZE-RESULTS.md#fused-rotary-embedding).
+
+It adds a third item to the list of things a fusion in this engine has to check,
+and this one is the sharpest:
+
+- **A fused kernel is not exact because the arithmetic looks the same.** torch's
+  complex multiply contracts its products with FMA, and the four ways to write
+  `(a+bi)(c+di)` in fp32 differ by one ulp on roughly one input in 300k. Here that
+  is not negligible: the uncontracted form is 2.66% faster and **produces different
+  tokens at step 8**, because the model turns a one-ulp logit difference into a
+different argmax. The synthetic exactness check could not see it -- at its
+  original 32 draws all four forms read zero differences, since random inputs
+  rarely land on a bf16 rounding tie. What settled it was comparing both paths on
+  every call the real model makes (`check_rope_inmodel.py`), over 3,192 calls and
+  2,133,504 elements: the contracted form differs on 0, the other three on 23
+  each. A draw count that reports zero is not evidence until it is large enough to
+  have found something.
 
 ## 4. Remove cohort waste and sampling synchronization
 

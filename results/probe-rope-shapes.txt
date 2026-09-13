@@ -1,0 +1,62 @@
+/root/glm-testing/ds41f/inference/custom_ar.py:51: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/custom_ar.py:51: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/custom_ar.py:51: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/custom_ar.py:51: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+  [placement] file=/root/glm-testing/ds41f/inference/expert_placement.pt sha256=e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030 layers=40 experts=384
+  [placement] layer 0 redistributed
+  [placement] layer 1 redistributed
+  [placement] layer 2 redistributed
+  [placement] layer 3 redistributed
+  [placement] layer 4 redistributed
+  [placement] layer 5 redistributed
+  [placement] layer 6 redistributed
+  [placement] layer 7 redistributed
+  [placement] layer 8 redistributed
+  [placement] layer 9 redistributed
+  [placement] layer 10 redistributed
+  [placement] layer 11 redistributed
+  [placement] layer 12 redistributed
+  [placement] layer 13 redistributed
+  [placement] layer 14 redistributed
+  [placement] layer 15 redistributed
+  [placement] layer 16 redistributed
+  [placement] layer 17 redistributed
+  [placement] layer 18 redistributed
+  [placement] layer 19 redistributed
+  [placement] layer 20 redistributed
+  [placement] layer 21 redistributed
+  [placement] layer 22 redistributed
+  [placement] layer 23 redistributed
+  [placement] layer 24 redistributed
+  [placement] layer 25 redistributed
+  [placement] layer 26 redistributed
+  [placement] layer 27 redistributed
+  [placement] layer 28 redistributed
+  [placement] layer 29 redistributed
+  [placement] layer 30 redistributed
+  [placement] layer 31 redistributed
+  [placement] layer 32 redistributed
+  [placement] layer 33 redistributed
+  [placement] layer 34 redistributed
+  [placement] layer 35 redistributed
+  [placement] layer 36 redistributed
+  [placement] layer 37 redistributed
+  [placement] layer 38 redistributed
+  [placement] layer 39 redistributed
+  [placement] applied /root/glm-testing/ds41f/inference/expert_placement.pt
+[probe] 368.00 ms/step over 4 decode steps
+[probe] 792 apply_rotary_emb calls, 198.0 per step
+  63.2/step  x=(1, 1, 64) stride=(512, 512, 1) torch.bfloat16 contig=True
+            freqs=(1, 32) stride=(32, 1) torch.complex64 inverse=False
+  59.5/step  x=(1, 1, 16, 64) stride=(8192, 8192, 512, 1) torch.bfloat16 contig=False
+            freqs=(1, 32) stride=(32, 1) torch.complex64 inverse=False
+  59.5/step  x=(1, 1, 16, 64) stride=(8192, 8192, 512, 1) torch.bfloat16 contig=False
+            freqs=(1, 32) stride=(32, 1) torch.complex64 inverse=True
+  12.0/step  x=(1, 1, 8, 64) stride=(1024, 1024, 128, 1) torch.bfloat16 contig=False
+            freqs=(1, 32) stride=(32, 1) torch.complex64 inverse=False
+  3.8/step  x=(1, 1, 64) stride=(128, 128, 1) torch.bfloat16 contig=True
+            freqs=(1, 32) stride=(32, 1) torch.complex64 inverse=False

@@ -1,0 +1,116 @@
+/root/glm-testing/ds41f/inference/profile_decode_stacks.py:41: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode_stacks.py:41: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode_stacks.py:41: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/profile_decode_stacks.py:41: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+  [placement] file=/root/glm-testing/ds41f/inference/expert_placement.pt sha256=e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030 layers=40 experts=384
+  [placement] layer 0 redistributed
+  [placement] layer 1 redistributed
+  [placement] layer 2 redistributed
+  [placement] layer 3 redistributed
+  [placement] layer 4 redistributed
+  [placement] layer 5 redistributed
+  [placement] layer 6 redistributed
+  [placement] layer 7 redistributed
+  [placement] layer 8 redistributed
+  [placement] layer 9 redistributed
+  [placement] layer 10 redistributed
+  [placement] layer 11 redistributed
+  [placement] layer 12 redistributed
+  [placement] layer 13 redistributed
+  [placement] layer 14 redistributed
+  [placement] layer 15 redistributed
+  [placement] layer 16 redistributed
+  [placement] layer 17 redistributed
+  [placement] layer 18 redistributed
+  [placement] layer 19 redistributed
+  [placement] layer 20 redistributed
+  [placement] layer 21 redistributed
+  [placement] layer 22 redistributed
+  [placement] layer 23 redistributed
+  [placement] layer 24 redistributed
+  [placement] layer 25 redistributed
+  [placement] layer 26 redistributed
+  [placement] layer 27 redistributed
+  [placement] layer 28 redistributed
+  [placement] layer 29 redistributed
+  [placement] layer 30 redistributed
+  [placement] layer 31 redistributed
+  [placement] layer 32 redistributed
+  [placement] layer 33 redistributed
+  [placement] layer 34 redistributed
+  [placement] layer 35 redistributed
+  [placement] layer 36 redistributed
+  [placement] layer 37 redistributed
+  [placement] layer 38 redistributed
+  [placement] layer 39 redistributed
+  [placement] applied /root/glm-testing/ds41f/inference/expert_placement.pt
+USDT:2026-09-14 05:34:43 2351110:2351110 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-14 05:34:43 2351108:2351108 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-14 05:34:43 2351107:2351107 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-14 05:34:43 2351109:2351109 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-09-14 05:34:44 2351110:2351110 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-14 05:34:44 2351109:2351109 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-14 05:34:44 2351108:2351108 SyncActivityProfilerHandler.cpp:46] profiler_stop
+USDT:2026-09-14 05:34:44 2351107:2351107 SyncActivityProfilerHandler.cpp:46] profiler_stop
+
+4199 kernels/step; unattributed 2710/step
+
+site                           op                          kernels/step   ms/step  top kernel
+?                              aten::copy_                        413.0     0.725  void at::native::elementwise_kernel
+?                              aten::mean                         252.4     0.667  void at::native::reduce_kernel
+?                              aten::mm                           176.0     0.682  void dot_kernel
+?                              aten::mul                          164.6     0.205  void at::native::elementwise_kernel
+?                              aten::cat                           80.0     0.150  void at::native::(anonymous namespace)::
+?                              aten::index_select                  53.4     0.095  void at::native::(anonymous namespace)::
+?                              aten::index_copy_                   50.4     0.103  void at::native::index_elementwise_kerne
+?                              aten::remainder                     48.0     0.065  void at::native::vectorized_elementwise_
+?                              aten::add                           33.8     0.033  void at::native::vectorized_elementwise_
+?                              aten::fill_                         19.0     0.014  void at::native::vectorized_elementwise_
+?                              aten::masked_fill_                  19.0     0.024  void at::native::vectorized_elementwise_
+?                              aten::arange                        15.4     0.011  void (anonymous namespace)::elementwise_
+?                              aten::lt                            15.0     0.022  void at::native::elementwise_kernel
+?                              aten::floor_divide                  13.4     0.018  void at::native::vectorized_elementwise_
+?                              aten::where                         13.0     0.016  void at::native::elementwise_kernel
+?                              aten::sub                           12.4     0.012  void at::native::vectorized_elementwise_
+?                              aten::sum                           11.2     0.034  void at::native::reduce_kernel
+?                              aten::bitwise_or                    11.0     0.012  void at::native::vectorized_elementwise_
+?                              aten::ge                            11.0     0.025  void at::native::elementwise_kernel
+?                              aten::topk                          10.0     0.128  void at::native::sbtopk::gatherTopK
+W0914 05:48:00.902000 2350142 site-packages/torch/distributed/elastic/agent/server/api.py:753] Received 15 death signal, shutting down workers
+W0914 05:48:00.904000 2350142 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 2351107 closing signal SIGTERM
+W0914 05:48:00.905000 2350142 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 2351108 closing signal SIGTERM
+W0914 05:48:00.905000 2350142 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 2351109 closing signal SIGTERM
+W0914 05:48:00.905000 2350142 site-packages/torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 2351110 closing signal SIGTERM
+W0914 05:48:30.905000 2350142 site-packages/torch/distributed/elastic/multiprocessing/api.py:1047] Unable to shutdown process 2351109 via 15, forcefully exiting via 9
+Traceback (most recent call last):
+  File "/root/miniforge3/envs/ds41f/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/run.py", line 1138, in main
+    run(args)
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/run.py", line 1129, in run
+    elastic_launch(
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
+    return launch_agent(
+           ^^^^^^^^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 377, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/elastic/metrics/api.py", line 134, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/elastic/agent/server/api.py", line 745, in run
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/elastic/agent/server/api.py", line 923, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 86, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2350142 got signal: 15

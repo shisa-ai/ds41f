@@ -18,8 +18,9 @@ different protocol.
 ## Scope and status
 
 Done and measured: the decode kernel work (FP8 GEMV, warp counts), the decode
-fusion pass (RMSNorm, hyper-connections, MoE SwiGLU; 6,232 to 4,558 launches/step
-and 11.9% lower decode latency, bit-identical tokens), the prefill
+fusion pass (RMSNorm, hyper-connections, MoE SwiGLU, rotary embedding; 6,232 to
+4,558 launches/step and 11.9% lower decode latency for the first three, then a
+further 2.3% for the rotary embedding, all bit-identical tokens), the prefill
 MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, two serving-path fixes (symmetric length
 bucketing, batched on-device sampling), the packed token-broadcast protocol, a
@@ -39,6 +40,7 @@ Remaining work and follow-up status:
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion, in a single-process model loop. Pipelining the token read was implemented and measured: it recovers none of it, because the served path's per-step barrier is the blocking NCCL broadcast inside `BroadcastModel.forward`, not the read (median 28.80 ms in `enqueue`, 0.019 ms in `resolve`). See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
+| Decode rotary embedding | **Fused, 2.3% lower decode latency at identical tokens.** The largest single unfused item in the step's op attribution (0.68 ms/step of `copy_` and `mul`), called 198 times per step in three launches each. One launch per call now, bit-identical to the reference at the contracted product form. Decode only; prefill is untouched. See [Fused rotary embedding](#fused-rotary-embedding). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
@@ -634,6 +636,7 @@ The checks are listed in [Verification](#verification).
 | Fused RMSNorm at decode | 8/norm | 2/norm | ~1,000 | +1.793 | +5.85% | identical |
 | Fused SwiGLU+route in the MoE | 9/layer | 1/layer | ~320 | +0.569 | +1.93% | identical |
 | Fused `hc_mixes` coefficient math | ~5/layer | 2/layer | ~120 | +0.422 | +1.47% | identical |
+| Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
 | **All three together** | | | **1,674** | **+3.883** | **11.9% lower** | **identical** |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
@@ -656,6 +659,85 @@ It fuses the cast-and-square and the add-rsqrt-multiply of the coefficient
 calculation, keeping torch's mean and the cuBLAS GEMM; `tl.math.rsqrt` is
 bit-identical to `torch.rsqrt`, so the whole chain is bit-exact -- 0 of 4,800 fp32
 elements differ over 200 draws at four seeds (`check_hc_mixes_decode.py`).
+
+The rotary-embedding row is a later pass again, measured against the same fused
+baseline; see [Fused rotary embedding](#fused-rotary-embedding).
+
+### Fused rotary embedding
+
+The launch-count table above groups kernels by name, which says *what* ran but not
+*which line* emitted it. Joining the trace's kernel, runtime and CPU-op levels by
+correlation id and source frame (`profile_decode_stacks.py`) ranks the step by the
+line that emits each launch, and the largest single unfused item was
+`apply_rotary_emb` (`model.py`): **0.519 ms/step of `aten::copy_` plus 0.160 ms of
+`aten::mul`, 0.68 ms or 2.8% of the step**.
+
+A decode step calls it **198 times** (`probe_rope_shapes.py`,
+`results/probe-rope-shapes.txt`). Each call is three launches -- `float()`, the
+complex multiply, `copy_` back -- over a small tensor, so the cost is launch count
+rather than bytes. `rope_kernels.py` does the three in one launch, in place, which
+is what the reference does anyway (`y.copy_(x)` with `y is x`).
+
+The call sites pass slices `x[..., -rd:]`, so the last dimension is contiguous and
+the one before it is strided. Over four decode steps the probe sees five
+signatures, and every leading dimension except the last is 1:
+
+| Site | Shape | Stride | Calls/step |
+| --- | --- | --- | ---: |
+| window KV latent | (1, 1, 64) | (512, 512, 1) | 63.2 |
+| q | (1, 1, 16, 64) | (8192, 8192, 512, 1) | 59.5 |
+| attention output (inverse) | (1, 1, 16, 64) | (8192, 8192, 512, 1) | 59.5 |
+| indexer | (1, 1, 8, 64) | (1024, 1024, 128, 1) | 12.0 |
+| main KV | (1, 1, 64) | (128, 128, 1) | 3.8 |
+
+Those five per-site counts are averages over four steps and sum to exactly 198.0
+per step; they are not integers because some call sites fire periodically rather
+than every step. Because the rows are uniform, the kernel needs only a row count
+and a row stride, and it handles the strided and contiguous cases and the
+conjugate (inverse) rotation. Frequencies are `complex64` with a single row,
+broadcast over heads, read from a float32 view of them with real and imaginary
+interleaved.
+
+**Exactness needed a measurement rather than an assumption, and the first
+assumption was wrong.** torch's complex multiply contracts its products, and
+*which* form it uses decides whether a one-ulp fp32 difference survives into the
+bf16 result -- about once in 300k elements, which this model turns into a
+different argmax. The synthetic check could not separate the forms: at 32 draws all
+four read zero differences, because random inputs rarely land on a bf16 rounding
+tie. At 512 draws it separates them, and `check_rope_inmodel.py`, which compares
+both paths on every call the real model makes, settles it:
+
+| Product form | Differing bf16 elements |
+| --- | ---: |
+| `re = fma(a,c,-(b*d))`, `im = fma(a,d,b*c)` | **0** |
+| `re = fma(a,c,-(b*d))`, `im = fma(b,c,a*d)` | 23 |
+| `re = a*c - b*d`, `im = fma(b,c,a*d)` | 23 |
+| `re = a*c - b*d`, `im = a*d + b*c` | 23 |
+
+over 3,192 calls and 2,133,504 elements in 24 decode steps. The first A/B with the
+uncontracted form was **2.66% faster and produced different tokens at step 8**: a
+one-ulp difference is not a rounding curiosity here, and the in-model comparison,
+not the synthetic one, is what catches it. With the contracted form:
+
+| Change | ms/step | Decode | Tokens |
+| --- | ---: | ---: | --- |
+| Fused rotary embedding at decode | +0.670, +0.651 | +2.36%, +2.30% | identical |
+
+Two interleaved A/B runs of three and four repeats (`results/ab-rope-fused.json`,
+`results/ab-rope-fused-b.json`): 28.400 → 27.729 and 28.365 → 27.714 ms/step. The
+trace agrees independently: in the no-graph profiles the `aten::copy_` plus
+`aten::mul` group falls from 0.930 to 0.250 ms/step, a 0.680 ms difference
+(`results/decode-stacks-rope-off.txt`, `results/decode-stacks-rope-on.txt`). The
+trusted benchmark (`results/trusted-rope-fused.json`) passes at 512, 2048 and 8192
+with decode `max_logit_diff` 0.0, `mean_kl` 0.0 and `top1_agreement` 1.0: the fused
+path is bit-identical there, not merely close.
+
+Decode only. The reference indexes frequencies by sequence position and broadcasts
+them over heads, so a multi-position tensor does not have uniform rows; the guard
+requires a single position and leaves prefill on the reference expression. Prefill
+is therefore unchanged, and its last-position gate values in the trusted run (0.51,
+0.54, 0.68, 0.71, 1.01, 1.06) sit inside the recorded spread of the pre-existing
+prefill nondeterminism described in [Noise floor](#noise-floor).
 
 ### Host dispatch caching
 
@@ -1324,6 +1406,14 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
 - `check_hc_mixes.py` measures a candidate change against the same-configuration
   noise floor at the same length, instead of against the fixed gate. It was used
   to choose between the `hc_mixes` dot modes and to gate the fused path.
+- `check_rope_exact.py` and `check_rope_inmodel.py` gate the fused rotary
+  embedding. The first compares the fused kernel against the reference expression
+  on the five decode shapes; the second runs the real model and compares both
+  paths on *every* call it makes, which is what caught a one-ulp product-contraction
+  difference that the synthetic check read as zero at its original draw count. The
+  in-model comparison is the gate: 0 of 2,133,504 bf16 elements over 3,192 calls.
+  `probe_rope_shapes.py` records the call sites, shapes, strides and frequency
+  layouts the kernel has to accept.
 - `check_prefill_parity.py` measures the whole-prompt divergence and the
   same-configuration noise floor side by side.
 

@@ -1,0 +1,34 @@
+trace: /data/ds41f/decode_trace_rank0.nograph.json
+4448 kernels/step; attributed 37820/88970 (42.5%), 2558 unattributed/step
+
+cpu_op                                        kernels/step   ms/step  us/kernel
+aten::copy_                                          494.5     0.934       1.89
+aten::mm                                             176.0     0.681       3.87
+aten::mean                                           253.0     0.677       2.68
+aten::mul                                            245.5     0.295       1.20
+aten::sort                                             8.0     0.214      26.72
+aten::cat                                             80.0     0.151       1.88
+aten::topk                                            10.0     0.127      12.72
+aten::add                                            115.0     0.116       1.01
+aten::index_copy_                                     51.0     0.108       2.13
+aten::index_select                                    54.0     0.094       1.74
+aten::pow                                             84.0     0.092       1.10
+aten::rsqrt                                           84.0     0.091       1.09
+aten::remainder                                       48.0     0.063       1.32
+aten::sum                                             11.5     0.045       3.95
+aten::argmax                                           1.0     0.027      27.20
+aten::ge                                              11.0     0.026       2.33
+aten::masked_fill_                                    19.0     0.025       1.29
+aten::lt                                              15.0     0.022       1.47
+aten::floor_divide                                    14.0     0.019       1.35
+aten::where                                           13.0     0.016       1.26
+aten::fill_                                           19.0     0.014       0.75
+aten::sub                                             13.0     0.012       0.95
+aten::bitwise_or                                      11.0     0.012       1.09
+aten::arange                                          16.0     0.011       0.70
+aten::clamp_min_                                       8.0     0.011       1.40
+aten::clamp_min                                        6.0     0.006       1.04
+aten::gather                                           4.0     0.006       1.55
+aten::eq                                               5.0     0.006       1.12
+aten::bitwise_not                                      4.0     0.005       1.29
+aten::bitwise_xor                                      3.0     0.003       1.01
