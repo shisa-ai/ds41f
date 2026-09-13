@@ -216,13 +216,18 @@ a promised ~100-to-26 target. Fusion is one lever alongside better kernels,
 allocation removal and host/device overlap.
 
 **Status (September 13).** The audit is done for B=1 at 2K context and it changes
-the shape of this section. The step is GPU-bound: the host enqueues a step in
-0.02 ms. It launches **6,232 kernels per step** with a median duration of 1.82 µs,
-and 43% of the kernel time sits in 5,731 elementwise, copy, reduce and activation
-quantization kernels; the five large groups (dense GEMV, sparse attention, both
-MoE projections, all-reduce) are 51% of the time in 501 launches. Decode is
-launch-count-bound, so fusion of the small kernels has the larger ceiling and
-single-kernel replacement has the smaller one. Separately, the per-step
+the shape of this section. It launches **6,232 kernels per step** with a median
+duration of 1.82 µs, and 43% of the kernel time sits in 5,731 elementwise, copy,
+reduce and activation quantization kernels; the five large groups (dense GEMV,
+sparse attention, both MoE projections, all-reduce) are 51% of the time in 501
+launches. The original note here read "the step is GPU-bound: the host enqueues a
+step in 0.02 ms", and **that 0.02 ms figure is withdrawn** -- it timed the gap
+between loop iterations and excluded the model call, so it measured nothing about
+enqueue cost. Corrected, the host spends ~24.4 ms inside the call, and removing
+~3.6 ms of it (`act_quant` dispatch caching) moves the step by only 0.71%, which
+is measured evidence that host dispatch is largely overlapped rather than proof
+from a launch count. See
+[Decode step budget](OPTIMIZE-RESULTS.md#decode-step-budget). Separately, the
 `torch.cuda.synchronize()` in the harness and the `sampled.tolist()` in
 `ReferenceBackend._collect` cost 2.8-3.1 ms/step (9%) and are removable — pipelined
 and synchronized decode produce identical tokens once prefill is deterministic —
@@ -231,9 +236,9 @@ but the delivery path must enqueue step *i+1* before reading step *i*'s token. S
 
 **First fusion pass (September 13).** Three of the chains named above are now
 fused: RMSNorm, the hyper-connection pre/post mixers, and the MoE SwiGLU+clamp+
-route-weight. **6,232 → 4,558 launches/step (−27%), decode +11.91%**
-(32.599 → 28.716 ms at B=1, 2K, worst rank, three interleaved repeats), with
-**bit-identical decode tokens**. Each change is guarded by a bit-exactness check
+route-weight. **6,232 → 4,558 launches/step (−27%), 11.9% lower decode latency**
+(32.599 → 28.716 ms/step at B=1, 2K, worst rank, three interleaved repeats;
+~13.5% higher tok/s), with **bit-identical decode tokens**. Each change is guarded by a bit-exactness check
 against its reference expression, not by the benchmark harness's parity gate: that
 gate compares its two arms, so a kernel present in both arms passes it.
 

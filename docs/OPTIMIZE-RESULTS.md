@@ -19,7 +19,7 @@ different protocol.
 
 Done and measured: the decode kernel work (FP8 GEMV, warp counts), the decode
 fusion pass (RMSNorm, hyper-connections, MoE SwiGLU; 6,232 to 4,558 launches/step
-and +11.91% decode, bit-identical tokens), the prefill
+and 11.9% lower decode latency, bit-identical tokens), the prefill
 MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, two serving-path fixes (symmetric length
 bucketing, batched on-device sampling), the packed token-broadcast protocol, a
@@ -35,8 +35,8 @@ Remaining work and follow-up status:
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
-| Per-step synchronization | Measured at 2.8-3.1 ms/step (9%). Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
-| Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth +11.91% decode at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
+| Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
+| Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | Measured. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is 1.2-1.3x faster than eager NCCL there. An end-to-end gain is not established. See [Collectives](#collectives). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
@@ -201,6 +201,30 @@ A 20-step CUDA/CPU profile of the B=1 decode step at 2K context
 published latency. The step is **GPU-bound**: the host enqueues a step in
 0.02 ms, and the CUDA kernels plus their inter-kernel gaps fill the whole step.
 
+> **Correction (September 13, later pass).** That 0.02 ms figure is wrong and has
+> been withdrawn. `probe_decode_cpu.py` timed the gap *between* loop iterations,
+> which is the loop's own bookkeeping plus the token write and excludes the model
+> call entirely, so it could not measure enqueue cost at all. With the measurement
+> moved inside the call, the host spends **~24.4 ms inside `model(...)`** on a
+> ~24.5 ms GPU step (`results/probe-decode-cpu-pipe.json`).
+>
+> What that 24.4 ms consists of is **not** established. `time.process_time()`
+> tracks wall time during a pure GPU wait (`probe_sync_spin.py`: 34.97 ms of process
+> time against 35.10 ms of wall while blocking on one matmul), so it counts the
+> sync spin and cannot separate host dispatch from blocking. The separate
+> micro-benchmark of one call site is sound, because it loops without syncing:
+> `act_quant` costs **16.8 µs of host dispatch per call** (wall and process time
+> agree at 16.80/16.84 µs over 1000 iterations), and it is called ~410 times per
+> step, so ~6.9 ms/step of host dispatch is real.
+>
+> Whether that host time is on the critical path was then tested directly rather
+> than inferred: caching `act_quant`'s kernel lookup, allocations and views removes
+> ~3.6 ms of that dispatch and moves the step by **+0.71%**
+> (`results/ab-act-quant-cache.json`). A saving that large showing up that small
+> means the host dispatch is largely overlapped with GPU execution, which is
+> evidence *for* the GPU-bound reading -- but from a measurement, not from the
+> withdrawn 0.02 ms.
+
 Kernel time, grouped from the trace (6,232 launches per step, 25.77 ms of kernel
 execution per step):
 
@@ -222,8 +246,12 @@ The median kernel in a decode step runs for **1.82 µs**; the 90th percentile is
 down and NCCL all-reduce) are 51% of the kernel time in 501 of the 6,232
 launches. The other 5,731 launches are elementwise, copy, reduce and activation
 quantization kernels worth 43% of the time. **Decode is launch-count-bound, not
-bandwidth-bound**, which is why replacing one large kernel with a faster
-equivalent of the same shape has a small ceiling, while fusing the small kernels
+bandwidth-bound** is too strong a claim to make from these numbers: thousands of
+small kernels make fusion promising, but a launch count does not by itself
+establish the bottleneck, and under graph replay the launch count the host issues
+is much smaller than the number of kernels the GPU runs. Summed kernel durations
+from one run are also not an additive wall-time budget. The measured justification
+for the fusion work is the end-to-end A/B, not the launch count.
 does not.
 
 ### The per-step synchronization costs 2.8-3.1 ms
@@ -235,12 +263,33 @@ token. Both drain the pipeline before the next step is enqueued.
 `probe_decode_cpu.py --mode pipe|sync` measures the same 30 decode steps from
 identical state with and without that drain, one mode per process:
 
-| Mode | enqueue | kernel span | wall |
+| Mode | host time in `model()` | kernel span | wall |
 | --- | ---: | ---: | ---: |
-| pipelined (no per-step sync) | 0.018 ms | 29.5 ms | **29.6 ms** |
-| synchronized each step | 0.021 ms | 32.3 ms | **32.4 ms** |
+| pipelined (no per-step sync) | 24.669 ms | 24.76 ms | **24.87 ms** |
+| synchronized each step | 13.214 ms | 27.83 ms | **27.99 ms** |
 
-The drain costs **2.8-3.1 ms/step, about 9%**, and it is not required for
+> **Correction.** This table previously reported an `enqueue` column of 0.018 ms
+> (pipelined) and 0.021 ms (synchronized), and those numbers are withdrawn. They
+> came from timing the gap between loop iterations, which is the loop's own
+> bookkeeping plus the token write and excludes the model call, so they could not
+> measure enqueue cost. The numbers above come from the timer moved *inside* the
+> call (`results/probe-decode-cpu-{pipe,sync}.json`, B=1, 2K, all fusions on).
+>
+> Two things about the corrected column. First, it is host time spent inside the
+> call, which is not the same as time spent issuing work: in pipelined mode the
+> queue fills and the host blocks on backpressure, which is why it reads 24.7 ms
+> there and 13.2 ms in synchronized mode, where every step starts from a drained
+> queue. So this column does not show that dispatch is cheap, and it does not show
+> that it is expensive either; the direct test of that is the `act_quant` cache
+> below, which removes ~3.6 ms of dispatch for +0.71%. Second, in synchronized
+> mode the `torch.cuda.synchronize()` sits *after* the timer, so that row's host
+> time excludes the drain by construction.
+>
+> The wall-time comparison, which is what this experiment was for, is unaffected:
+> **27.99 − 24.87 = 3.12 ms/step, about 11%** of the post-fusion step.
+
+The drain costs **3.12 ms/step, about 11%** of the post-fusion step (it was
+2.8-3.1 ms, 9%, against the pre-fusion 32.4 ms step), and it is not required for
 correctness: with the deterministic prefill (`DSV41F_PF_FIXED_ORDER=1`) both modes
 produce byte-identical token sequences from the same start state, including the
 10-step warm-up before the measured window.
@@ -252,11 +301,11 @@ about pipelining until prefill is made deterministic. That confound produced a
 wrong first reading of this measurement; it is recorded here so the check is not
 repeated without the flag.
 
-The step budget therefore reads: 25.8 ms of kernel execution, roughly 3.7 ms of
-inter-kernel gaps inside the graph replays, and 2.8-3.1 ms of exposed
-synchronization. The synchronization is the only part that is pure host-side loss,
-and recovering it needs the delivery path to read a token from step *i* after
-enqueueing step *i+1*, not before.
+The step budget therefore reads: 24.8 ms of kernel execution, roughly 3.7 ms of
+inter-kernel gaps inside the graph replays, and 3.12 ms of exposed
+synchronization (post-fusion, B=1, 2K). The synchronization is the only part that
+is pure host-side loss, and recovering it needs the delivery path to read a token
+from step *i* after enqueueing step *i+1*, not before.
 
 ## Decode kernel fusion
 
@@ -278,18 +327,48 @@ The checks are listed in [Verification](#verification).
 | Fused `hc_pre`/`hc_post` at decode | ~18/layer | 4/layer | ~560 | +1.755 | +5.76% | identical |
 | Fused RMSNorm at decode | 8/norm | 2/norm | ~1,000 | +1.793 | +5.85% | identical |
 | Fused SwiGLU+route in the MoE | 9/layer | 1/layer | ~320 | +0.569 | +1.93% | identical |
-| **All three together** | | | **1,674** | **+3.883** | **+11.91%** | **identical** |
+| Fused `hc_mixes` coefficient math | ~5/layer | 2/layer | ~120 | +0.422 | +1.47% | identical |
+| **All three together** | | | **1,674** | **+3.883** | **11.9% lower** | **identical** |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
 (`results/ab-hc-fused-decode.json`, `results/ab-rmsnorm-fused.json`,
 `results/ab-moe-swiglu-fused.json`). The combined row toggles all three flags at
-once (`results/ab-combined-decode-fusion.json`); it is 11.91% rather than the
+once (`results/ab-combined-decode-fusion.json`); it is 11.9% rather than the
 13.5% the rows sum to, which is the expected sub-additivity when several changes
-all remove the same kind of launch. The est. removed/step column is the launch
+all remove the same kind of launch. `+11.91%` in the saved JSON is a *latency*
+reduction, not a throughput gain: 32.599 → 28.716 ms/step is 11.9% lower latency
+and about 13.5% higher tok/s. The est. removed/step column is the launch
 arithmetic, not a measurement; it sums to ~1,880 against a measured net of 1,674,
 because the per-change counts come from the reference expressions while the
 measured net comes from the two traces below.
+
+The `hc_mixes` row is a later pass and is not in the combined row: the three
+earlier fusions were already on when it was measured, so its `ms/step` is against
+the fused baseline (28.753 → 28.332 ms/step, `results/ab-hc-mixes-decode.json`).
+It fuses the cast-and-square and the add-rsqrt-multiply of the coefficient
+calculation, keeping torch's mean and the cuBLAS GEMM; `tl.math.rsqrt` is
+bit-identical to `torch.rsqrt`, so the whole chain is bit-exact -- 0 of 4,800 fp32
+elements differ over 200 draws at four seeds (`check_hc_mixes_decode.py`).
+
+### Host dispatch caching
+
+`act_quant` costs **16.8 µs of host dispatch per call** and runs ~410 times per
+step, so ~6.9 ms/step of the host's ~24.4 ms is that one function
+(`probe_host_dispatch.py`; wall and process time agree, so this is dispatch and
+not a sync spin). Caching its kernel lookup, its two allocations and its three
+views removes ~3.6 ms of that, and moves the step by **+0.71%** (28.610 → 28.408
+ms/step, `results/ab-act-quant-cache.json`), bit-identical outputs over 3 reps x 3
+shapes (`check_act_quant_cache.py`).
+
+That gap is the finding: a 3.6 ms saving showing up as 0.2 ms means host dispatch
+is largely overlapped with GPU execution. It is left **off by default**
+(`DSV41F_ACT_QUANT_CACHE=1` opts in) because the cached path returns *shared*
+`y`/`s` buffers: a caller that holds them across another `act_quant` call of the
+same shape sees them overwritten. That is safe on one stream, where the consumer
+is enqueued immediately after the producer -- which is how the decode path uses
+it -- but it is an assumption about the callers, and 0.71% does not buy the right
+to make it silently.
 
 ### Where the launches went
 
@@ -321,8 +400,9 @@ One row needs a caveat. The bf16 all-reduce is 11 launches in both traces but 0.
 ms before and 2.17 ms after. A single trace per configuration cannot separate
 run-to-run variance in the collective from a real effect: with fewer kernels on
 the GPU, a collective that previously overlapped other work is more exposed. The
-end-to-end A/B (+11.91%, three repeats, interleaved) is the trustworthy number
-here; the per-group split is one trace each and should be read as indicative.
+end-to-end A/B (11.9% lower latency, three repeats, interleaved) is the
+trustworthy number here; the per-group split is one trace each and should be read
+as indicative.
 
 ### Why the reductions stayed in torch
 
@@ -850,6 +930,16 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   probes that located the `tl.exp`/`tl.sqrt`/division differences behind the first
   non-exact attempts.
 - `check_hc_exact.py` asserts the fused `hc_pre` and `hc_post` are bit-identical
+  to their reference expressions; `check_hc_mixes_decode.py` does the same for the
+  fused `hc_mixes` coefficient math at decode (0 of 4,800 fp32 elements differ over
+  200 draws at four seeds), and `check_act_quant_cache.py` does the same for the cached
+  `act_quant` path (0 differing bytes over 3 reps x 3 shapes).
+- `probe_step_host_time.py` and `probe_sync_spin.py` are the control pair behind the
+  withdrawn 0.02 ms enqueue figure: the first measures host time inside a decode
+  step, the second shows `time.process_time()` tracks wall time during a pure GPU
+  wait, which is why the first cannot separate dispatch from blocking.
+  `probe_host_dispatch.py` measures one call site in isolation, which is why its
+  16.8 µs/call figure survives.
   to the reference expression at bf16 output, including at `s=1`.
 - `check_hc_mixes.py` measures a candidate change against the same-configuration
   noise floor at the same length, instead of against the fixed gate. It was used
@@ -884,8 +974,9 @@ experts. A recorded example is `results/manifest-shipped.json`
   activations to FP8 and Marlin does not, so the two are not numerically
   interchangeable and a switch needs its own correctness gate. See [FP4 expert
   MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels).
-- **Per-step synchronization (OPTIMIZE.md section 3).** Measured at 2.8-3.1 ms/step
-  (9%) and shown to be removable without changing tokens when prefill is
+- **Per-step synchronization (OPTIMIZE.md section 3).** Measured at 3.12 ms/step
+  (11% of the post-fusion step; 2.8-3.1 ms, 9%, before fusion) and shown to be
+  removable without changing tokens when prefill is
   deterministic, but not removed. The fix belongs in the delivery path: enqueue
   step *i+1* before reading step *i*'s sampled token, rather than syncing to read
   it first. `benchmark_ds41f.py` and `ReferenceBackend._collect` both drain per
@@ -972,6 +1063,9 @@ DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py --flag _HC
 CUDA_VISIBLE_DEVICES=0 python check_rms_norm.py 200 3
 CUDA_VISIBLE_DEVICES=0 python check_moe_swiglu_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
+CUDA_VISIBLE_DEVICES=0 python check_hc_mixes_decode.py
+CUDA_VISIBLE_DEVICES=0 python check_act_quant_cache.py
+CUDA_VISIBLE_DEVICES=0 python probe_host_dispatch.py
 CUDA_VISIBLE_DEVICES=0 python probe_rsqrt.py
 CUDA_VISIBLE_DEVICES=0 python probe_swiglu_steps.py
 
