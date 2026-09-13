@@ -666,11 +666,12 @@ baseline; see [Fused rotary embedding](#fused-rotary-embedding).
 ### Fused rotary embedding
 
 The step budget's launch-count table groups kernels by name, which says *what* ran
-but not *which line* emitted it. Joining the trace's kernel, runtime and CPU-op
-levels by correlation id and source frame (`profile_decode_stacks.py`) ranks the
-step by the line that emits each launch, and the largest single unfused item was
-`apply_rotary_emb` (`model.py`): **0.519 ms/step of `aten::copy_` plus 0.160 ms of
-`aten::mul`, 0.68 ms or 2.8% of the step**.
+but not *which line* emitted it. Containing each launch's host timestamp in the
+trace's `python_function` frames ranks the step by the function that issued each
+launch (see [Attributing launches to the function that issued
+them](#attributing-launches-to-the-function-that-issued-them)), and the largest
+single unfused item was `apply_rotary_emb` (`model.py`): **0.519 ms/step of
+`aten::copy_` plus 0.160 ms of `aten::mul`, 0.68 ms or 2.8% of the step**.
 
 A decode step calls it **198 times** (`probe_rope_shapes.py`,
 `results/probe-rope-shapes.txt`). Each call is three launches -- `float()`, the
@@ -806,6 +807,72 @@ the GPU, a collective that previously overlapped other work is more exposed. The
 end-to-end A/B (11.9% lower latency, three repeats, interleaved) is the
 trustworthy number here; the per-group split is one trace each and should be read
 as indicative.
+
+### Attributing launches to the function that issued them
+
+The launch-count table above groups kernels by name, which says *what* ran but not
+*which line* emitted it. The tool that was supposed to answer that
+(`profile_decode_stacks.py`) printed `?` in its `site` column for every row and
+looked like it was working: it read `cpu_op.args['source']`, and current kineto
+leaves that field empty. The Python stacks are still in the trace, as their own
+`python_function` events, but nothing links a `cpu_op` to them.
+
+There is a join that does not need one. Every kernel carries a `correlation`, and
+both `cuda_runtime` and `cuda_driver` record that correlation with a **host
+timestamp** -- the moment the launch was issued. Containment of that timestamp in
+the `python_function` frames names the function that issued the launch, for
+**100%** of kernels, including the Triton and TileLang ones. The op-name join is
+the one that stays partial (29.7% here), because a driver launch
+(`cuLaunchKernelEx`) carries no `External id` to reach a `cpu_op` with. Both fixes
+are in `analyze_decode_stacks.py`, which re-analyzes a saved trace in seconds
+instead of re-profiling.
+
+Two limits are worth stating before the table, because they decide what it can be
+used for:
+
+- **Granularity is the function, not the statement.** A `python_function` event is
+  per invocation and its line is the function's definition line in the traced
+  revision, so `model.py:1299 forward` means `MoE.forward` and not a line inside it.
+- **A replayed graph has no Python stack.** Everything inside the MoE's own
+  per-layer decode graph lands on `MoE.forward`, so its 1,400 launches are
+  attributed to the function that called `replay()`. They can still be read by
+  kernel name, which is why the table keeps that column.
+
+Non-collective kernel time, by issuing function, from
+`results/decode-stacks-attribution.txt` (no-graph trace, 2K context, 5 steps):
+
+| Function | ms/step | launches/step | what is in it |
+| --- | ---: | ---: | --- |
+| `MoE.forward` | 8.596 | 1,400 | replayed graph: `_w13` 2.35, `_w2` 1.80, `fp8_gemv` 1.47, 720 elementwise 1.51, `act_quant` 0.52, routing 0.67 |
+| `kernel.py` (TileLang) | 3.629 | 342 | `sparse_attn` 2.75, `act_quant` 0.51, `hc_split_sinkhorn` 0.33 |
+| `fp8_gemv` (dense) | 1.702 | 170 | one custom GEMV per dense linear |
+| `hc_mixes_decode` | 0.908 | 400 | `aten::mm` 0.44, `aten::mean` 0.30, two fused kernels 0.16 |
+| `rms_norm_fused` | 0.673 | 496 | `aten::mean` 0.33, `_rms_apply` 0.19, `_square_cast` 0.15 |
+| `Attention.forward` | 0.566 | 156 | `bmm` 0.35, `cat` 0.15, `index_select` 0.08 |
+| `Indexer.forward` | 0.518 | 133 | `sort` 0.21, `topk` 0.11, arithmetic 0.20 |
+| `ParallelHead.forward` | 0.193 | 1 | one all-gather |
+| `RowParallelLinear.forward` | 0.143 | 80 | `copy_`, a cast around the all-reduce |
+| `Attention._window_kv` | 0.136 | 80 | `index_copy_` 0.08, `remainder` 0.05 |
+| `hc_post_fused` | 0.135 | 80 | one fused kernel |
+| `rope_apply_` | 0.117 | 132 | the fused rotary kernel |
+| **total** | **17.64** | **3,620** | plus 92 NCCL launches, which this trace exposes |
+
+Three things this changes:
+
+- The two `aten::mean` sites are **0.63 ms/step together** (2.3%), and both exist
+  only because torch's reduction order is not reproducible in a kernel. That is
+  the largest single identified item left, and it is the one
+  [already measured and rejected](#the-one-launch-rmsnorm-measured-and-not-enabled):
+  the one-launch variant is 2.97% faster and differs on ~5 bf16 elements per
+  million.
+- The named "KV-cache writes" are smaller than the name suggests: `cat`,
+  `index_copy_` and the `remainder` around them are **0.28 ms/step** (1.0%), spread
+  over three functions.
+- `MoE.forward` is 31% of non-collective kernel time and its non-GEMM half
+  (elementwise 1.51, routing 0.67, `act_quant` 0.52) is **2.70 ms/step**. The
+  routing chain is the largest thing in the step that is neither a GEMM nor a
+  collective, and it is inside a replayed graph, so attributing it further needs
+  the MoE decode graph disabled rather than more analysis of this trace.
 
 ### Why the reductions stayed in torch
 
@@ -1484,6 +1551,12 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   H2D pieces, which is what showed that its 0.22 ms/call is transfer latency rather
   than the dispatch count the first attempt assumed. `probe_engram_chain.py` times
   the same pieces in isolation under four-rank host contention.
+- `analyze_decode_stacks.py` attributes a decode kernel to the function that issued
+  it, by containing the launch's host timestamp in the trace's `python_function`
+  frames. It replaced a join through `cpu_op.args['source']`, which current kineto
+  leaves empty -- the old path printed `?` for every row and looked like it worked.
+  Coverage is 100% of kernels, including driver-launched Triton and TileLang ones.
+  It reads a saved trace, so the profile and the analysis are separate runs.
 - `check_prefill_parity.py` measures the whole-prompt divergence and the
   same-configuration noise floor side by side.
 
