@@ -1,0 +1,123 @@
+{
+  "checkpoint": {
+    "files": {
+      "model0-mp4.safetensors": {
+        "bytes": 130673094032,
+        "mtime": 1789028806.128312,
+        "path": "/data/ds41f/DSV41F-TP4/model0-mp4.safetensors",
+        "sha256": "931a8b0e63c1036dd1b24c64e24e49d31a38d52eb6142f93f230e5a0fe55484d",
+        "sha256_scope": "first_1048576_bytes"
+      },
+      "model1-mp4.safetensors": {
+        "bytes": 130673118696,
+        "mtime": 1789028876.5222774,
+        "path": "/data/ds41f/DSV41F-TP4/model1-mp4.safetensors",
+        "sha256": "4ef0d52c3ac8eea5e43b3e0b6f4b625ada24ce84d5e46882f8393ea3436ffed2",
+        "sha256_scope": "first_1048576_bytes"
+      },
+      "model2-mp4.safetensors": {
+        "bytes": 130673119656,
+        "mtime": 1789028953.1982393,
+        "path": "/data/ds41f/DSV41F-TP4/model2-mp4.safetensors",
+        "sha256": "caacffa39903eb79df48fa6649b1a685a427f7493c188695484e3655203b6298",
+        "sha256_scope": "first_1048576_bytes"
+      },
+      "model3-mp4.safetensors": {
+        "bytes": 130673120160,
+        "mtime": 1789029027.7612016,
+        "path": "/data/ds41f/DSV41F-TP4/model3-mp4.safetensors",
+        "sha256": "9f5e36e77d30707840ec981d0a656d4e1bdcf1a4e50cf3b4b9e3bb34fe3ff38a",
+        "sha256_scope": "first_1048576_bytes"
+      },
+      "tokenizer.json": {
+        "bytes": 6367257,
+        "mtime": 1789029027.7782016,
+        "path": "/data/ds41f/DSV41F-TP4/tokenizer.json",
+        "sha256": "462d744d52ec66501066d2fadcd5e25e2706dcae6518d7c45b1c54f785016be0",
+        "sha256_scope": "first_1048576_bytes"
+      },
+      "tokenizer_config.json": {
+        "bytes": 801,
+        "mtime": 1789029027.7792015,
+        "path": "/data/ds41f/DSV41F-TP4/tokenizer_config.json",
+        "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+        "sha256_scope": "first_1048576_bytes"
+      }
+    },
+    "path": "/data/ds41f/DSV41F-TP4"
+  },
+  "config": {
+    "bytes": 1982,
+    "mtime": 1789024904.0792656,
+    "path": "/root/glm-testing/ds41f/inference/config.json",
+    "sha256": "2e84f45cf1dac8c7fcbb200e96667d4b913275690668ed496f24c7747207a809",
+    "sha256_scope": "full"
+  },
+  "created_at": "2026-09-13T12:28:41+0800",
+  "engine_repo": {
+    "available": true,
+    "branch": "main",
+    "dirty": true,
+    "dirty_paths": [
+      "M src/ds41f/backend/expert_placement.py",
+      "?? .pi/",
+      "?? src/ds41f/manifest.py",
+      "?? tests/test_manifest.py"
+    ],
+    "path": "/root/ds41f",
+    "revision": "e5000c663742d00f5c20501c74dbe83d33e3b9c9"
+  },
+  "env": {},
+  "model_repo": {
+    "available": true,
+    "branch": "main",
+    "dirty": false,
+    "dirty_paths": [],
+    "path": "/root/glm-testing",
+    "revision": "a25965674c9267fe017ce9daee46dc53d005af86"
+  },
+  "placement": {
+    "bytes": 248567,
+    "experts": 384,
+    "invalid_layers": [],
+    "keys": [
+      "balanced_max_over_ideal",
+      "current_max_over_ideal",
+      "loads",
+      "new_to_old"
+    ],
+    "layers": 40,
+    "path": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+    "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+    "valid_permutation": true
+  },
+  "runtime": {
+    "cuda": "13.0",
+    "device_count": 8,
+    "device_names": [
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e",
+      "NVIDIA H20-3e"
+    ],
+    "nccl": "2.30.7",
+    "python": "3.12.14",
+    "tilelang": "0.1.8",
+    "torch": "2.14.0+cu130",
+    "triton": "3.8.0"
+  },
+  "sources": {
+    "/root/ds41f/src/ds41f/backend/expert_placement.py": "35c12fd9f5dcafccbd64e1b10ea1f7348e8fe481945386a8ea9c5d1e7cf4134b",
+    "/root/ds41f/src/ds41f/backend/reference.py": "b70f695a6ed65c7b71fcea0ef63b7b17254ced581879e50c12d4a02c0f591133",
+    "/root/ds41f/src/ds41f/scheduler/scheduler.py": "f9ac08c0e95da6360e2bca39e6b0f13e083266528a7beb78ae529deff8d274cc",
+    "/root/glm-testing/ds41f/inference/benchmark_ds41f.py": "a5fc48a402d6ecfb38ab412285401b2b4c1b8bb9774375090819ecafe339a1b8",
+    "/root/glm-testing/ds41f/inference/grouped_moe.py": "ff81cefa528cd978e614c24e7237ec146add8a972f6d11cd99552e2f876dc30f",
+    "/root/glm-testing/ds41f/inference/hc_kernels.py": "5b1f7047bbe585864371c79f41fb8ea0cb847c71141c03d88d44113db641ded4",
+    "/root/glm-testing/ds41f/inference/kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+    "/root/glm-testing/ds41f/inference/model.py": "b504179375ecef12c6a0cfe688f91274ced88fe2404c3462fc501c60d6cb77c6"
+  }
+}

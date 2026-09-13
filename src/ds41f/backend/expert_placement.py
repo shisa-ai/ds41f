@@ -30,7 +30,10 @@ skips it leaves the others blocked.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -43,6 +46,9 @@ __all__ = [
     "apply",
     "maybe_apply",
     "report",
+    "fingerprint",
+    "expected_sha256",
+    "check_expected_hash",
 ]
 
 
@@ -157,12 +163,77 @@ def exchange_plan(n2o: torch.Tensor, rank: int, world: int):
     return mine, dest, want, src
 
 
+def expected_sha256() -> str | None:
+    """The placement hash a run is pinned to, from ``DSV41F_EXPERT_PLACEMENT_SHA256``.
+
+    Unset means "accept whatever calibration is named". Set means the calibration is
+    part of the run's identity: a different file must fail loudly rather than silently
+    relabel experts and change which rank computes what.
+    """
+    value = os.environ.get("DSV41F_EXPERT_PLACEMENT_SHA256", "").strip().lower()
+    return value or None
+
+
+def fingerprint(path: str) -> dict:
+    """Identity of a placement artifact: content hash, shape and permutation validity.
+
+    Pure file inspection, no model and no process group, so a manifest can pin the
+    calibration and a loader can log exactly which file it used.
+    """
+    raw = Path(path).read_bytes()
+    info: dict = {
+        "path": os.path.abspath(path),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "bytes": len(raw),
+        "keys": [],
+        "layers": None,
+        "experts": None,
+        "valid_permutation": False,
+        "invalid_layers": [],
+    }
+    blob = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
+    if not isinstance(blob, dict):
+        return info
+    info["keys"] = sorted(str(k) for k in blob.keys())
+    n2o = blob.get("new_to_old")
+    if n2o is None or not torch.is_tensor(n2o) or n2o.dim() != 2:
+        return info
+    n2o = n2o.long()
+    info["layers"], info["experts"] = int(n2o.shape[0]), int(n2o.shape[1])
+    want = torch.arange(n2o.shape[1])
+    invalid = [
+        layer
+        for layer in range(n2o.shape[0])
+        if not torch.equal(n2o[layer].sort().values, want)
+    ]
+    info["invalid_layers"] = invalid
+    info["valid_permutation"] = not invalid
+    return info
+
+
+def check_expected_hash(info: dict, expected: str | None) -> None:
+    """Raise if ``info`` (from :func:`fingerprint`) does not match the pinned hash."""
+    if expected is not None and info["sha256"] != expected:
+        raise ValueError(
+            f"{info['path']}: sha256 {info['sha256']} does not match "
+            f"DSV41F_EXPERT_PLACEMENT_SHA256={expected}"
+        )
+
+
 @torch.no_grad()
 def apply(model, placement_path: str, rank: int, world: int, verbose: bool = False) -> None:
     """Permute gates and redistribute experts in place. Call before any forward.
 
     Collective: every rank in the TP group must call it with the same path.
     """
+    info = fingerprint(placement_path)
+    check_expected_hash(info, expected_sha256())
+    if verbose and rank == 0:
+        print(
+            f"  [placement] file={info['path']} sha256={info['sha256']} "
+            f"layers={info['layers']} experts={info['experts']}",
+            flush=True,
+        )
     blob = torch.load(placement_path, map_location="cpu", weights_only=True)
     n2o_all = blob["new_to_old"].long()
     dev = torch.cuda.current_device()

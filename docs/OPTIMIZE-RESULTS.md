@@ -388,6 +388,15 @@ its prefill criterion is a single prompt position. Four checks cover those gaps:
 - `check_prefill_parity.py` measures the whole-prompt divergence and the
   same-configuration noise floor side by side.
 
+**Provenance pinning.** `ds41f.manifest` records a run's engine and model-repo
+revisions, source-file hashes, config hash, checkpoint identity and the placement
+calibration's sha256 plus permutation validity. `benchmark_ds41f.py` now embeds
+that manifest in every report, and `expert_placement.apply` logs the resolved
+file and its hash on rank 0 and enforces `DSV41F_EXPERT_PLACEMENT_SHA256` when it
+is set, so a served request can name the exact calibration that relabelled its
+experts. A recorded example is `results/manifest-shipped.json`
+(placement sha256 `e8cab35b…`, 40 layers x 384 experts, valid permutation).
+
 ## Not done
 
 - **Prefill determinism.** The grouped prefill's `_w2_m` uses `atomic_add`, which
@@ -460,10 +469,17 @@ DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 profile_engram.py
 # collectives; --custom needs vllm installed, and records per-shape custom_error
 # otherwise (every row here, since it is not installed in this environment)
 torchrun --nproc-per-node 4 bench_collectives.py --custom
+
+# provenance: pin revisions, source/config hashes, checkpoint and placement
+python -m ds41f.manifest --out results/manifest.json \
+  --engine-repo /root/ds41f --model-repo /root/glm-testing \
+  --config config.json --ckpt /data/ds41f/DSV41F-TP4 --placement expert_placement.pt
 ```
 
-`expert_placement.pt` is a generated artifact and is not committed.
-`expert_placement.maybe_apply` picks it up when it sits next to the module, uses
+Set `DSV41F_EXPERT_PLACEMENT_SHA256` to the calibration's hash to make a run fail
+loudly if a different placement file is used.
+
+`expert_placement.pt` is a generated artifact and is not committed. `expert_placement.maybe_apply` picks it up when it sits next to the module, uses
 `DSV41F_EXPERT_PLACEMENT` when that is set, and does nothing when it is `none`.
 Without it, expert ownership is contiguous and 8K prefill is about 15% slower.
 
