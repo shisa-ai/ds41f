@@ -96,20 +96,20 @@ need their own measurements.
 ## Performance
 
 One request, four GPUs, text only. Averages of two runs of the optimized
-configuration in [`results/trusted-fused.json`](results/trusted-fused.json), with
-the pre-fusion run in [`results/trusted-shipped.json`](results/trusted-shipped.json)
+configuration in [`results/trusted-sgbatch.json`](results/trusted-sgbatch.json),
+with the pre-fusion run in [`results/trusted-shipped.json`](results/trusted-shipped.json)
 for comparison:
 
 | Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
 | --- | ---: | ---: | ---: | ---: |
-| 512 tokens | 1,344 tok/s | 0.38 s | 35.74 tok/s | 27.98 ms/token |
-| 2,048 tokens | 2,561 tok/s | 0.80 s | 35.54 tok/s | 28.14 ms/token |
-| 8,192 tokens | 3,370 tok/s | 2.43 s | 35.56 tok/s | 28.12 ms/token |
+| 512 tokens | 1,346 tok/s | 0.38 s | 35.79 tok/s | 27.94 ms/token |
+| 2,048 tokens | 2,573 tok/s | 0.80 s | 35.65 tok/s | 28.05 ms/token |
+| 8,192 tokens | 3,366 tok/s | 2.43 s | 35.67 tok/s | 28.04 ms/token |
 
-The decode kernels are 13.9-14.4% faster than the pre-fusion baseline (32.40-32.56
-ms/token to 27.98-28.14 ms/token, or +16.1% to +16.8% throughput). Prompt
-processing is unchanged within noise (1,330 to 1,344, 2,580 to 2,561, 3,392 to
-3,370 tok/s): the fused kernels are decode-only, and prefill keeps the reference
+The decode kernels are 13.8-14.3% faster than the pre-fusion baseline (32.40-32.56
+ms/token to 27.94-28.05 ms/token, or +16.0% to +16.7% throughput). Prompt
+processing is unchanged within noise (1,330 to 1,346, 2,580 to 2,573, 3,392 to
+3,366 tok/s): the fused kernels are decode-only, and prefill keeps the reference
 expressions. See [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
 
 - Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Throughput is the slowest GPU worker.
@@ -118,25 +118,54 @@ expressions. See [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-f
 - Results use optimized GPU kernels and an expert-placement file calibrated on random token IDs. The file is not committed, so a deployment needs its own calibration on realistic traffic. The fused `hc_mixes` coefficient projection is enabled at decode and disabled at prefill.
 - Earlier runs and before/after comparisons are in the [detailed results](docs/OPTIMIZE-RESULTS.md).
 
+Serving several rows at once is now a fast path rather than a fallback. Same
+harness, 2K prompt, 32 decode steps, worst rank, in
+[`results/batch-decode-final.json`](results/batch-decode-final.json):
+
+| Batch | Decode latency | Aggregate throughput | Before |
+| ---: | ---: | ---: | ---: |
+| 1 | 24.72 ms/step | 40.5 tok/s | 24.68 ms/step |
+| 2 | 50.39 ms/step | 39.7 tok/s | 158.52 ms/step |
+| 4 | 61.32 ms/step | 65.2 tok/s | 159.19 ms/step |
+| 8 | 82.34 ms/step | 97.2 tok/s | 159.77 ms/step |
+
+The "before" column is the same harness with the whole-step graph restricted to a
+single row, which is how the engine ran until now. Two sequential single-row steps
+cost 49.4 ms, so a batch of two is within 2% of running the rows one after the
+other and batches of four and eight win clearly. See
+[Batched decode](docs/OPTIMIZE-RESULTS.md#batched-decode).
+
 ### Served latency
 
-Through the HTTP/SSE server (`serve/bench_serving.py`), one request, greedy, ~64-token prompt:
+Through the HTTP/SSE server (`serve/bench_serving.py`), one request, greedy, 61-token prompt, with the server recording every backend step:
 
-| Measurement | Served | Model loop |
+| Measurement | Served | Model loop, same context |
 | --- | ---: | ---: |
-| Time to first token | 178 ms | — |
-| Inter-token latency | 28.54 ms | 28.12 ms |
-| Decode throughput | 35.0 tok/s | 35.6 tok/s |
+| Time to first token | 181 ms | — |
+| Model step, batch 1 | 28.48 ms | 26.96 ms |
+| Client inter-token latency | 28.78 ms | 26.96 ms |
 
-Prompt processing as a client sees it is a **1.25 s TTFT for a ~4K-token prompt**. The serving path adds about 1.5% on top of the model loop, so sampling, delivery and SSE framing are not where the remaining time is.
+The serving path adds **1.5 ms per step** over the model loop at the same context: the rank-0-to-rank-3 broadcast plus the backend's per-row sampling and token write-back. A further 0.3 ms to the client is HTTP, SSE framing and detokenization.
 
-Concurrency is measured and does not scale: per-request latency is unchanged at concurrency 2 (28.57 ms), but aggregate throughput falls to 15.0 tok/s at concurrency 4 and TTFT rises from 0.18 s to 3-18 s. The cause is not established. See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
+Prompt processing as a client sees it is a **1.25 s TTFT for a 3,646-token prompt** (2,922 tok/s). The model loop measures 2,573 tok/s at 2,048 tokens and 3,366 tok/s at 8,192, so ~3,650 tokens lands near 2,900 tok/s. The served path runs at the model-loop rate.
+
+Concurrency works, and it is worth reading the [step trace](docs/OPTIMIZE-RESULTS.md#concurrency-what-the-scheduler-actually-executed) rather than the client numbers:
+
+| Concurrency | Aggregate | Client ITL | Worst TTFT |
+| ---: | ---: | ---: | ---: |
+| 1 | 34.75 tok/s | 28.78 ms | 0.18 s |
+| 2 | 33.04 tok/s | 28.60 ms | 3.12 s |
+| 4 | 39.07 tok/s | 61.84 ms | 3.54 s |
+
+At concurrency 2 the two requests ran as two separate single-row cohorts in two of three runs, so the unchanged latency is concurrency 1 twice, not a batched step. At concurrency 4 every run formed a cohort of three and left the fourth to wait a full generation, which is the 3.1-7.4 s TTFT. A cohort is whatever is in the wait queue when the engine asks; there is no admission window.
+
+The batched step itself was slow for two reasons, both fixed. A batch of two cost 158.5 ms/step because the whole-step graph only ran at input shape `(1, 1)`, then 67.7 ms because the batched MoE took the grouped prefill path, whose tiles are 64 rows tall at any token count. It now costs 50.4 ms, and batch 4 and 8 cost 61.3 and 82.3 ms. See [Batched decode](docs/OPTIMIZE-RESULTS.md#batched-decode).
 
 ### Limits
 
 - **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position, where the two paths agree. Over the whole prompt they differ by 15.7–16.1 on the logits with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
 - **Decode agreement holds only for a shared starting state.** It does not show that prompt processing builds equivalent state.
-- **One request at a time is no longer untested, and concurrency is worse.** Batches of 2 leave per-request inter-token latency unchanged (28.57 ms against 28.54 ms), so two rows cost the same per step as one. But aggregate throughput falls at 4 (15.0 tok/s against 35.0 at concurrency 1) with per-request latency up 5.8x, and TTFT rises from 0.18 s to 3-18 s. The cause is not established. See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
+- **Concurrency is measured and works, with a cohorting gap.** Aggregate throughput at concurrency 4 went from 15.03 to 39.07 tok/s once batched decode stopped falling off the whole-step graph and off the prefill MoE path. What remains is scheduling, not compute: a cohort is whatever is in the wait queue when the engine asks, so a straggler waits a full generation (3.1-7.4 s TTFT at concurrency 4). See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
 - **No matched vLLM comparison.** Local vLLM numbers use different workloads and methods, so the speedup is uncontrolled.
 - **The custom-allreduce path does not run on this stack.** It is 1.6x faster than graphed NCCL in isolation, but routing the engine through it dies on a CUDA `invalid argument` from vLLM's kernel, so it is not integrated and the ~3.5 ms/step the trace attributes to the collective group is unclaimed.
 

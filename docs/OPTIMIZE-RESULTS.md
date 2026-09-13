@@ -24,7 +24,8 @@ MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, two serving-path fixes (symmetric length
 bucketing, batched on-device sampling), the packed token-broadcast protocol, a
 decode-step budget with its kernel/launch breakdown, the Marlin MXFP4 MoE
-comparison, and three measured-and-rejected candidates (`wo_a` in FP8, and the
+comparison, batched decode (whole-step graphs and the MoE path both keyed by batch
+size), and three measured-and-rejected candidates (`wo_a` in FP8, and the
 object-plus-tensor broadcast protocols the packed one replaced).
 
 Remaining work and follow-up status:
@@ -33,13 +34,14 @@ Remaining work and follow-up status:
 | --- | --- |
 | Marlin / FP4-expert kernel comparison | **Measured: 2.8× faster than the engine's grouped GEMV, graphed, at the real per-rank mix.** Not integrated; the two differ in activation precision (W4A16 vs the engine's W4A8), so a switch needs its own correctness gate. See [FP4 expert MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels). |
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
-| Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
+| Graph coverage beyond B=1 | **Measured and fixed.** The step graphs and their buffers are keyed by batch size (`DSV41F_SG_BATCH_MAX`, default 8) and the batched MoE no longer takes the prefill tile path below 8 rows. Batches of 2, 4 and 8 cost 50.4, 61.3 and 82.3 ms/step against 158.5-159.8 before, and the graphed and eager paths are bit-identical at every size. See [Batched decode](#batched-decode). |
+| Cohort admission | Missing. A cohort is whatever is in the wait queue when the engine asks for one, so a request that arrives a moment late waits for a full generation. Every measured concurrency-4 run left a straggler behind at 3.1-7.4 s TTFT. An admission window is the obvious fix and has not been measured. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | Measured at the collective, and end-to-end integration **failed**. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes, but routing the engine's call sites through it dies on `custom_all_reduce.cuh:164 'invalid argument'` on this build, so the integration was reverted. See [Collectives](#collectives). |
-| Served latency (HTTP/SSE) | **Measured.** Decode 28.54 ms inter-token (35.0 tok/s) against the model loop's 28.12 ms, so the serving path adds ~0.4 ms/token. Prefill TTFT 1.25 s at ~4K. Concurrency is measured and **degrades**: see [Served latency](#served-latency). |
+| Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
 
 ## Served latency
@@ -48,56 +50,202 @@ Every number elsewhere in this document is the model loop: `benchmark_ds41f.py`
 has no HTTP, no scheduler and no token delivery, and the README says so.
 `serve/bench_serving.py` talks to the running server over its OpenAI-compatible
 SSE endpoint, so what it reports includes queueing, sampling, delivery and SSE
-framing. One request, four GPUs, greedy, ~64-token prompt:
+framing.
 
-| Measurement | Served | Model loop | Overhead |
+Three corrections to what this section previously claimed, all of them found by
+instrumenting the server rather than the client:
+
+- The overhead comparison was not matched. It put a 61-token prompt with at most
+  128 generated tokens against the 8K row of the model loop, and explained the gap
+  by saying the served context "grows through that range". It does not: 61 tokens
+  in, at most 128 out, is at most 189 tokens of context.
+- The client counted nonempty SSE content chunks as tokens. The server emits one
+  chunk per decoded-text delta, and a delta can carry several tokens or none. The
+  streaming path now returns a `usage` chunk when the request sets
+  `stream_options.include_usage`, and `bench_serving.py` reads
+  `completion_tokens` from it. For these runs the two counts happen to agree.
+- "Per-request latency is unchanged at concurrency 2, so two rows cost the same
+  per step as one" was an inference the measurement could not support. The step
+trace below shows that at concurrency 2 the two requests ran as **two separate
+single-row cohorts**, so nothing was batched and no batched step was timed.
+
+### Matched measurement, one request
+
+One request, four GPUs, greedy, 61-token prompt, `DS41F_STEP_TRACE` recording
+every backend step:
+
+| Measurement | Served | Model loop, same context | Overhead |
 | --- | ---: | ---: | ---: |
-| Time to first token | 178.5 ms | — | — |
-| Inter-token latency | 28.54 ms | 28.12 ms | **+0.42 ms/token (+1.5%)** |
-| Decode throughput | 35.04 tok/s | 35.56 tok/s | −1.5% |
+| Model step, batch 1 | 28.48 ms | 26.96 ms | **+1.52 ms (+5.6%)** |
+| Client inter-token latency | 28.78 ms | 26.96 ms | +1.82 ms (+6.8%) |
+| Time to first token | 180.9 ms | — | — |
 
-(`results/served-decode.json`, `results/served-prefill.json`. The model-loop
-column is the 8K row of `results/trusted-fused.json`, chosen because the served
-run's context grows through that range.)
+(`results/step-trace-final-all.jsonl`, `results/served-final-c1.json`,
+`results/trusted-matched-64.json`. The model-loop column is the 64-token row of
+the matched run, 26.90 and 27.02 ms over two repeats.)
 
-That is the useful result: the serving path is **not** where the remaining time is.
-Sampling, delivery, SSE framing and the scheduler cost about 1.5% on top of a step
-that is already ~28 ms, which also means the 3.12 ms/step drain measured in the
-model loop is not being hidden by anything in the served path.
+The 1.52 ms between the two model steps is the broadcast from rank 0 to ranks 1-3
+plus the backend's per-row top-p pass and token write-back; the further 0.30 ms to
+the client is HTTP, SSE framing and detokenization. Both are real and bounded, and
+the served step is still within 6% of a step that has no HTTP, no scheduler and no
+delivery.
 
-Prompt processing as a client sees it: **TTFT 1.25 s** for a ~4K-token prompt
-(1.23 s, 1.25 s after a 1.90 s cold first call). The model loop processes 2,561
-tok/s at 2K and 3,370 tok/s at 8K, so ~4K lands near 1.2-1.3 s, which is what the
-served path reports.
+Prompt processing as a client sees it: **TTFT 1.25 s for a 3,646-token prompt**
+(1.234 s, 1.248 s after a 1.551 s cold first call), which is 2,922 tok/s. The
+model loop measures 2,561 tok/s at 2,048 tokens and 3,370 tok/s at 8,192, so
+~3,650 tokens lands near 2,900 tok/s, or 1.26 s. The served path is at the
+model-loop rate, not 1.5% above it.
 
-### Concurrency degrades, and the reason is not established
+### Concurrency: what the scheduler actually executed
 
-| Concurrency | Aggregate | Inter-token latency | Worst TTFT |
+`serve/server.py` writes one JSONL line per backend step when `DS41F_STEP_TRACE`
+is set, recording the op, the number of rows, their request ids, the wall time and
+how many of that step's forwards took the whole-step graph. A client cannot see
+any of that: sequential single-row execution and batched execution produce the
+same per-request latency when the batched step is slow, which is exactly the case
+this section used to argue about.
+
+| Concurrency | Aggregate | Client ITL | Worst TTFT | Cohorts observed |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | 34.75 tok/s | 28.78 ms | 0.18 s | 3 of 3 runs one row |
+| 2 | 33.04 tok/s | 28.60 ms | 3.12 s | 1 run of two rows, 2 runs of two single rows |
+| 4 | 39.07 tok/s | 61.84 ms | 3.54 s | 3 of 3 runs three rows plus a straggler |
+
+Median per-step time by batch size, from the trace, every step replayed from the
+whole-step graph. The model-loop column is `bench_batch_decode.py` at a 2K prompt,
+which is the closest measured context; the served rows run a 61-token context:
+
+| Batch | Served step | Model loop, 2K prompt | Steps observed |
 | ---: | ---: | ---: | ---: |
-| 1 | 35.04 tok/s | 28.54 ms | 0.18 s |
-| 2 | 33.43 tok/s | 28.57 ms | 3.97 s |
-| 4 | 15.03 tok/s | 164.19 ms | 3.1-18.4 s |
+| 1 | 28.48 ms | 24.72 ms | 960 |
+| 2 | 55.26 ms | 50.39 ms | 376 |
+| 3 | 61.79 ms | — | 235 |
 
-Two things are visible and one is not.
+Three findings, all of which the client-side numbers alone got wrong:
 
-Visible: at concurrency 2 the per-request inter-token latency is **unchanged**
-(28.57 ms against 28.54 ms), so two rows in a batch cost the same per step as one.
-That is the expected behaviour for a memory-bound decode GEMV and it means
-batching itself is not the problem.
+**Batching was not happening at concurrency 2.** In two of the three runs the two
+requests were admitted as separate single-row cohorts, because the second request
+had not arrived when the scheduler admitted the first. That is why per-request
+latency matched concurrency 1 exactly: it was concurrency 1, twice. The 3.1-3.5 s
+TTFT is the second request waiting for the first cohort's full 128-token
+generation, which is `128 x 28.5 ms = 3.65 s`.
 
-Visible: TTFT jumps from 0.18 s to ~4 s at concurrency 2, which is about one full
-128-token generation (128 x 28.5 ms = 3.65 s). The reading is that a request
-arriving while a cohort is running waits for that cohort to drain rather than being
-admitted into it. That is a scheduling property, measured here for the first time,
-and it is what the README's "rows stay in a batch until it drains" predicts.
+**The scheduler has no admission window.** A cohort is whatever is in the wait
+queue at the instant the engine asks. At concurrency 4 every run formed a cohort
+of three and left the fourth to run alone, and that straggler is the 3.1-7.4 s
+TTFT. This is the same mechanism as the concurrency-2 case and it is now measured
+rather than inferred.
 
-Not established: why concurrency 4 is far worse than concurrency 2. Per-request
-latency rises 5.8x while the batch grows 2x, and the TTFT spread (3.1 s to 18.4 s)
-varies by run, so something is serialising or contending rather than simply doing
-more work. The sample is two repeats per point and the server's `--max-active` is
-4, so this is a first measurement of a real regression, not a characterisation of
-it. It needs its own pass before anyone sizes a deployment from it -- which is the
-honest state of the README's previous "batches of 2, 4 and 8 are unmeasured" claim.
+**The batched step was slow for two separate reasons, both now fixed.** See
+[Batched decode](#batched-decode) for the measurements. Before the fixes a batch
+of two cost 158.5 ms per step because it fell off the whole-step graph entirely,
+and after that was fixed it still cost 71.5 ms because it took the grouped prefill
+MoE path, whose tiles are 64 rows tall at any token count. At 71.5 ms a batch of
+two was worse in aggregate than running the two rows one after the other, so
+batching at concurrency 2 was a loss even once it worked.
+
+With both fixes, a batch of two costs 55.26 ms against 2 x 28.48 = 56.96 ms of
+sequential work, so batching is ahead at two and clearly ahead above it.
+Concurrency 4 aggregate throughput went from 15.03 to 39.07 tok/s.
+
+## Batched decode
+
+Batches larger than one row were never on a fast path. Two separate causes, found
+and fixed in that order.
+
+### The whole-step graph was single-row only
+
+`Transformer.forward` took the whole-step CUDA graph only when `input_ids.shape`
+was exactly `(1, 1)`, and every buffer the graph captured was a single-row
+constant. A cohort of two or four therefore ran eagerly and launched ~4,200 kernels
+from the host per step. `bench_batch_decode.py` measures the result with the graphs
+forced off, 2K prompt, 32 decode steps, worst rank:
+
+| Batch | ms/step | Aggregate tok/s |
+| ---: | ---: | ---: |
+| 1 | 24.68 | 40.5 |
+| 2 | 158.52 | 12.6 |
+| 4 | 159.19 | 25.1 |
+| 8 | 159.77 | 50.1 |
+
+The cost is flat from batch 2 to batch 8, which is the signature of launch count
+rather than rows. The graphs and their buffers are now keyed by batch size in
+`Transformer._sg_states`, built on first use, with both position parities captured
+per size. `DSV41F_SG_BATCH_MAX` (default 8) caps the sizes built; `1` restores the
+single-row-only behaviour. `serve/server.py` warms every size the scheduler can
+admit while loading, so the first cohort of a new size does not pay a multi-second
+capture inside a request.
+
+### The batched MoE took the prefill path
+
+With the graph fixed, a batch of two still cost 67.7 ms. `MoE._forward` sent every
+flattened token count above 1 to `GroupedMoE.routed_batch`, the grouped prefill
+path, whose token tiles are `BM=64` rows tall and whose expert grid is sized for a
+whole prompt. At two tokens that is the same work as at 64, and the cost was flat
+from batch 2 to batch 4, so it was the tile machinery, not the rows.
+
+`DSV41F_MOE_DECODE_ROWS` (default 8) now routes token counts up to 8 to the
+single-row decode kernels, one call per row. The whole-step graph makes the extra
+launches free. Measured worst rank, 2K prompt, 32 decode steps, 3 repeats:
+
+| Batch | ms/step before | ms/step after | Aggregate tok/s before | after |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 24.78 | 24.72 | 40.4 | 40.5 |
+| 2 | 67.70 | **50.39** | 29.5 | **39.7** |
+| 4 | 77.57 | **61.32** | 51.6 | **65.2** |
+| 8 | 93.29 | **82.34** | 85.8 | **97.2** |
+
+(`results/batch-decode-sg.json` and `results/batch-decode-final.json`.)
+
+This is the more accurate path, not a speed-for-accuracy trade.
+`check_moe_decode_rows.py` compares both paths against the reference `Expert`
+forwards on real checkpoint weights, with routing ids that repeat and that point
+outside the rank's expert range:
+
+| Batch | Per-row vs reference | `routed_batch` vs reference |
+| ---: | ---: | ---: |
+| 1 | 0.00000 | 0.04059 |
+| 2 | 0.00000 | 0.04143 |
+| 4 | 0.00000 | 0.04494 |
+| 8 | 0.00000 | 0.04270 |
+| 16 | 0.00001 | 0.04391 |
+
+(Normalized RMS. `results/check-moe-decode-rows.json`.) The per-row path is
+bit-identical to the reference at every batch size the threshold covers;
+`routed_batch` is not. End to end, the greedy continuation from one restored state
+is token-for-token identical with the threshold at 0 and at 8, at batches 2, 4 and
+8 (`results/parity-moerows0.json`, `results/parity-moerows8.json`).
+
+### Whole-step graph parity
+
+Generalizing the graph to more rows does not change its results. Over 24 decode
+steps from one restored state, the graphed arm and an eager arm agree exactly -- 0
+differing token steps and `max_logit_diff` 0.0 at batches 1, 2, 4 and 8 -- and a
+third arm that reruns the eager configuration from the same state also agrees at
+0.0, so the comparison has no residual noise floor.
+
+The parity harness needs `DSV41F_PF_FIXED_ORDER=1` to make that control arm
+meaningful. Without it the same test reports 5.2, 11.9 and 28.3 at batches 2, 4 and
+8, which is the pre-existing `atomic_add` nondeterminism of the grouped prefill
+MoE that the batch path already used, not the graph. With the per-row MoE above,
+batches up to 8 no longer reach `routed_batch` at all and the flag is not needed
+for them.
+
+### What is still open
+
+A cohort is whatever is in the wait queue at the instant the engine asks for one.
+There is no admission window, so at concurrency 4 every measured run formed a
+cohort of three and left the fourth request to wait for a full generation. Adding a
+short admission delay is the obvious next change, but it trades TTFT for a
+predictable cohort size and no version of it has been measured.
+
+Above the threshold `routed_batch` is still the right path, but where the
+crossover sits is not settled. The isolated MoE benchmark in
+`check_moe_decode_rows.py` puts it between batch 4 and batch 8, favouring
+`routed_batch` from 8 upward -- yet end to end, batch 8 is 11 ms per step faster
+with the per-row path. The isolated number cannot see that the whole-step graph
+makes the extra launches free. Batch 16 and above was not measured end to end,
+and the threshold is left at 8.
 
 ## Full-prompt diagnostic run
 

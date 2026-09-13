@@ -1,0 +1,142 @@
+{
+ "mode": "parity",
+ "prompt_len": 2048,
+ "rows": [
+  {
+   "batch": 1,
+   "decode_steps": 24,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    556,
+    223,
+    558,
+    223,
+    2056,
+    223,
+    572,
+    223
+   ],
+   "eager_tokens": [
+    556,
+    223,
+    558,
+    223,
+    2056,
+    223,
+    572,
+    223
+   ]
+  },
+  {
+   "batch": 2,
+   "decode_steps": 24,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    558,
+    565,
+    223,
+    223,
+    470,
+    565,
+    223,
+    223
+   ],
+   "eager_tokens": [
+    558,
+    565,
+    223,
+    223,
+    470,
+    565,
+    223,
+    223
+   ]
+  },
+  {
+   "batch": 4,
+   "decode_steps": 24,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    558,
+    510,
+    470,
+    223,
+    223,
+    2365,
+    223,
+    1500
+   ],
+   "eager_tokens": [
+    558,
+    510,
+    470,
+    223,
+    223,
+    2365,
+    223,
+    1500
+   ]
+  },
+  {
+   "batch": 8,
+   "decode_steps": 24,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    572,
+    18,
+    223,
+    378,
+    15,
+    65,
+    223,
+    1410
+   ],
+   "eager_tokens": [
+    572,
+    18,
+    223,
+    378,
+    15,
+    65,
+    223,
+    1410
+   ]
+  }
+ ]
+}

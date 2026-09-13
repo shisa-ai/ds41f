@@ -1,0 +1,145 @@
+{
+  "rows": [
+    {
+      "batch": 1,
+      "topk_slots_per_local_expert": [
+        0,
+        0,
+        1,
+        0,
+        0,
+        3
+      ],
+      "per_row_vs_reference": {
+        "rms": 0.0,
+        "max_abs": 0.0,
+        "max_abs_over_absmax": 0.0
+      },
+      "routed_batch_vs_reference": {
+        "rms": 0.0405893512070179,
+        "max_abs": 0.22759521007537842,
+        "max_abs_over_absmax": 0.029833268374204636
+      },
+      "per_row_vs_routed_batch": {
+        "rms": 0.04038528725504875,
+        "max_abs": 0.22759521007537842,
+        "max_abs_over_absmax": 0.02960272505879402
+      },
+      "per_row_us": 201.08406897634268,
+      "routed_batch_us": 371.1532025287549
+    },
+    {
+      "batch": 2,
+      "topk_slots_per_local_expert": [
+        0,
+        1,
+        0,
+        2,
+        1,
+        0
+      ],
+      "per_row_vs_reference": {
+        "rms": 0.0,
+        "max_abs": 0.0,
+        "max_abs_over_absmax": 0.0
+      },
+      "routed_batch_vs_reference": {
+        "rms": 0.0414261631667614,
+        "max_abs": 0.11509305238723755,
+        "max_abs_over_absmax": 0.013871856033802032
+      },
+      "per_row_vs_routed_batch": {
+        "rms": 0.041356611996889114,
+        "max_abs": 0.11509305238723755,
+        "max_abs_over_absmax": 0.013872315175831318
+      },
+      "per_row_us": 285.53973728169996,
+      "routed_batch_us": 600.9917007759213
+    },
+    {
+      "batch": 4,
+      "topk_slots_per_local_expert": [
+        2,
+        3,
+        0,
+        1,
+        1,
+        4
+      ],
+      "per_row_vs_reference": {
+        "rms": 0.0,
+        "max_abs": 0.0,
+        "max_abs_over_absmax": 0.0
+      },
+      "routed_batch_vs_reference": {
+        "rms": 0.04493648186326027,
+        "max_abs": 0.15955519676208496,
+        "max_abs_over_absmax": 0.04676145315170288
+      },
+      "per_row_vs_routed_batch": {
+        "rms": 0.04486556723713875,
+        "max_abs": 0.15955519676208496,
+        "max_abs_over_absmax": 0.04467250406742096
+      },
+      "per_row_us": 634.4473299880822,
+      "routed_batch_us": 831.2175283208489
+    },
+    {
+      "batch": 8,
+      "topk_slots_per_local_expert": [
+        4,
+        8,
+        3,
+        3,
+        3,
+        4
+      ],
+      "per_row_vs_reference": {
+        "rms": 0.0,
+        "max_abs": 0.0,
+        "max_abs_over_absmax": 0.0
+      },
+      "routed_batch_vs_reference": {
+        "rms": 0.04270350933074951,
+        "max_abs": 0.22623610496520996,
+        "max_abs_over_absmax": 0.027559572830796242
+      },
+      "per_row_vs_routed_batch": {
+        "rms": 0.04257955774664879,
+        "max_abs": 0.22623610496520996,
+        "max_abs_over_absmax": 0.02690674550831318
+      },
+      "per_row_us": 1367.35326765726,
+      "routed_batch_us": 859.6016714970272
+    },
+    {
+      "batch": 16,
+      "topk_slots_per_local_expert": [
+        7,
+        12,
+        8,
+        8,
+        8,
+        5
+      ],
+      "per_row_vs_reference": {
+        "rms": 8.140817953972146e-06,
+        "max_abs": 0.001953125,
+        "max_abs_over_absmax": 0.00027218289324082434
+      },
+      "routed_batch_vs_reference": {
+        "rms": 0.04391016066074371,
+        "max_abs": 0.24657416343688965,
+        "max_abs_over_absmax": 0.03436199575662613
+      },
+      "per_row_vs_routed_batch": {
+        "rms": 0.04388364776968956,
+        "max_abs": 0.24657416343688965,
+        "max_abs_over_absmax": 0.03406712785363197
+      },
+      "per_row_us": 2647.161933903893,
+      "routed_batch_us": 859.3110290045539
+    }
+  ],
+  "tolerance": 0.005
+}

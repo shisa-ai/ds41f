@@ -1,0 +1,33 @@
+{
+  "mode": "prefill",
+  "prompt_tokens_requested": 4096,
+  "max_tokens": 4,
+  "concurrency": 1,
+  "repeats": 3,
+  "samples": [
+    {
+      "ttft_s": 1.5506701341364533,
+      "itl_s": 0.029438918999706704,
+      "tokens": 4,
+      "chunks": 4,
+      "prompt_tokens": 3646,
+      "total_s": 1.6448210021480918
+    },
+    {
+      "ttft_s": 1.2484342879615724,
+      "itl_s": 0.03075168134334187,
+      "tokens": 4,
+      "chunks": 4,
+      "prompt_tokens": 3646,
+      "total_s": 1.3463155559729785
+    },
+    {
+      "ttft_s": 1.2340455518569797,
+      "itl_s": 0.02922765933908522,
+      "tokens": 4,
+      "chunks": 4,
+      "prompt_tokens": 3646,
+      "total_s": 1.3361502019688487
+    }
+  ]
+}

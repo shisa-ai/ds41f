@@ -1,0 +1,120 @@
+{
+ "prompt_len": 2048,
+ "decode_steps": 32,
+ "repeats": 2,
+ "step_graphs_default": false,
+ "summary": [
+  {
+   "batch": 1,
+   "pipelined_ms_worst_rank": 109.76629643846536,
+   "synchronized_ms_worst_rank": 109.81672630441608,
+   "paths": {
+    "step_graph": 32,
+    "eager_step": 0,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 0
+   },
+   "per_request_ms": 109.76629643846536
+  },
+  {
+   "batch": 2,
+   "pipelined_ms_worst_rank": 158.47214937093668,
+   "synchronized_ms_worst_rank": 158.41146179445786,
+   "paths": {
+    "step_graph": 0,
+    "eager_step": 32,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 1280
+   },
+   "per_request_ms": 158.47214937093668
+  }
+ ],
+ "rows": [
+  {
+   "batch": 1,
+   "repeat": 0,
+   "pipelined_ms": 109.76629643846536,
+   "synchronized_ms": 109.81627095316071,
+   "pipelined_paths": {
+    "step_graph": 32,
+    "eager_step": 0,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 0
+   },
+   "synchronized_paths": {
+    "step_graph": 32,
+    "eager_step": 0,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 0
+   },
+   "max_mem_gib": 79.90889406204224
+  },
+  {
+   "batch": 1,
+   "repeat": 1,
+   "pipelined_ms": 110.85649793676566,
+   "synchronized_ms": 110.79969831916969,
+   "pipelined_paths": {
+    "step_graph": 32,
+    "eager_step": 0,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 0
+   },
+   "synchronized_paths": {
+    "step_graph": 32,
+    "eager_step": 0,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 0
+   },
+   "max_mem_gib": 79.90889406204224
+  },
+  {
+   "batch": 2,
+   "repeat": 0,
+   "pipelined_ms": 158.4686199130374,
+   "synchronized_ms": 158.40792811650317,
+   "pipelined_paths": {
+    "step_graph": 0,
+    "eager_step": 32,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 1280
+   },
+   "synchronized_paths": {
+    "step_graph": 0,
+    "eager_step": 32,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 1280
+   },
+   "max_mem_gib": 79.90889406204224
+  },
+  {
+   "batch": 2,
+   "repeat": 1,
+   "pipelined_ms": 158.47209212370217,
+   "synchronized_ms": 158.63716198509792,
+   "pipelined_paths": {
+    "step_graph": 0,
+    "eager_step": 32,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 1280
+   },
+   "synchronized_paths": {
+    "step_graph": 0,
+    "eager_step": 32,
+    "moe_any": 1280,
+    "moe_grouped_decode": 0,
+    "moe_grouped_prefill": 1280
+   },
+   "max_mem_gib": 79.90889406204224
+  }
+ ]
+}
