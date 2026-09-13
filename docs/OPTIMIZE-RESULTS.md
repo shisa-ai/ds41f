@@ -29,7 +29,7 @@ Not done, in rough order of expected impact:
 | Marlin / FP4-expert kernel comparison | Not attempted. The format qualification was part of the experiment, not a reason to call it complete. |
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
-| Engram lookup cost | Unmeasured. The graphed decode wrapper still runs Engram outside replay with a synchronous index transfer to CPU and a CPU gather/dequantize. |
+| Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | DSpark feasibility spike | Deferred wholesale, including the early spike. |
 | Custom / symmetric-memory collectives | Not measured. NCCL only; see [Collectives](#collectives). |
 | Deterministic prefill | Not attempted. See [Noise floor](#noise-floor). |
@@ -316,6 +316,29 @@ representative natural-generation prompts. Random-token prompts are not a qualit
 test, and no held-out task evaluation was run. Those are the missing evidence the
 correctness gates in OPTIMIZE.md ask for.
 
+## Engram lookup cost
+
+With `DSV41F_ENGRAM_OFFLOAD=1` the two n-gram tables are CPU-resident (they do not
+fit on the GPU alongside the weights), so every Engram layer runs `_gather_cpu`:
+indices go D2H, rows are gathered and dequantized on the CPU, and the result comes
+back H2D. The D2H copy is synchronous, so that sequence is exposed in the step
+rather than overlapped. `profile_engram.py` measures it directly
+(`results/engram-cost.json`):
+
+| | |
+| --- | --- |
+| Decode step, baseline | 32.33 ms |
+| Engram calls per step | 2 |
+| Engram per step | 0.452 ms |
+| Engram per call | 0.226 ms |
+| Share of the decode step | 1.40% |
+| Instrumentation overhead | 0.052 ms (0.16%) |
+
+The instrumentation is a sync plus two `perf_counter` reads per call, so the
+overhead column bounds its own error. At 1.4% this is real but not the bottleneck,
+which also bounds the prize: even eliminating the lookup entirely cannot move
+decode by more than about 1.4%, so it does not explain the gap to vLLM.
+
 ## Noise floor
 
 The prefill output is not deterministic run to run. The grouped prefill's `_w2_m`
@@ -378,9 +401,11 @@ its prefill criterion is a single prompt position. Four checks cover those gaps:
   the vLLM Marlin kernels vendored and qualified against E2M1/E8M0 semantics.
   The FP8 GEMV/GEMM comparison in [Decode changes](#decode-changes) is a different
   experiment and does not stand in for it.
-- **Engram lookup cost (section 6).** Unmeasured. The graphed decode wrapper still
-  executes Engram outside replay, with a synchronous index transfer to CPU and a
-  CPU gather/dequantize; what that currently costs was never profiled.
+- **Engram lookup cost (section 6).** Measured, not optimised. It exposes 0.45 ms
+  per decode step (1.4%). The graphed decode wrapper still executes Engram outside
+  replay with a synchronous index transfer to CPU and a CPU gather/dequantize; the
+  fix would be to move the lookup into the graph or keep a hot subset of rows
+  resident on the GPU. The measurement caps the gain at ~1.4% of decode.
 - **`_PREFILL_BF16` expert weight tables.** Implemented and left off. It is not
   memory-feasible at this scale: exact dequantization of the local experts to
   bf16 needs roughly 4x the fp4 storage, about 290 GB per rank, against 141 GB
@@ -430,6 +455,7 @@ $PY --nproc-per-node 4 profile_prefill.py
 $PY --nproc-per-node 4 profile_decode.py
 $PY --nproc-per-node 4 profile_prefill_ops.py
 $PY --nproc-per-node 4 diag_balance.py
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 profile_engram.py
 
 # collectives; --custom needs vllm installed, and records per-shape custom_error
 # otherwise (every row here, since it is not installed in this environment)

@@ -1,0 +1,13 @@
+{
+  "prompt_len": 2048,
+  "steps": 20,
+  "decode_ms_baseline": 32.33078704215586,
+  "decode_ms_instrumented": 32.382542034611106,
+  "engram_calls_per_step": 2.0,
+  "engram_ms_per_step": 0.45198644511401653,
+  "engram_pct_of_step": 1.3980063167799626,
+  "engram_ms_per_call": 0.22599322255700827,
+  "instrumentation_overhead_ms": 0.051754992455244064,
+  "offloaded_tables": 2,
+  "total_tables": 2
+}
