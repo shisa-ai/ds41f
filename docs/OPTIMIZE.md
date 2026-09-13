@@ -16,6 +16,11 @@ dedicated [vLLM implementation](https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4.
 as the production comparison. Section 5 now includes our source-level DSpark
 feasibility analysis; runtime integration and its performance gate remain open.
 
+For the latest saved timings, see the [README](../README.md#performance-results-one-request-four-gpus-text)
+and [latest measurements](OPTIMIZE-RESULTS.md#latest-saved-model-measurements).
+The newer full-prompt diagnostic run is marked failed on correctness checks.
+The review below retains the earlier tuning-pass numbers to explain its findings.
+
 **The first pass's measurements are in [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md).
 The review below supersedes its incorrect parity interpretation and its claim
 that alternative collective backends were benchmarked.**
