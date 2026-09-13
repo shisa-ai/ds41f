@@ -30,6 +30,12 @@ Every parity criterion passes on every row: `top1_agreement` 1.0,
 `prefill_top1_agreement` 1.0, `max_logit_diff` 0.0, and
 `prefill_max_logit_diff` 0.65-1.12 against its 1.25 gate.
 
+Those prefill numbers are last-position only, and that is a weak signal — see
+[Noise floor](#noise-floor). Measured over the whole prompt, the optimized and
+naive arms differ by up to 16.3 with 0.76 top-1 agreement. That is not a defect in
+the optimized path: two runs of the *same* optimized configuration differ by up to
+12.3 with 0.76 agreement, while the naive arm is bit-deterministic at 0.0000.
+
 ## Decode changes
 
 ### M=1 dense linears use the FP8 GEMV kernel
@@ -118,6 +124,14 @@ Prefill 8192: 2967 → 3400 tok/s. Prefill 2048: 2363 → 2589 tok/s. The MoE
 to the module when present, and `DSV41F_EXPERT_PLACEMENT=none` to disable.
 Startup grows by 10-15 s for the redistribution.
 
+It was initially applied only by the benchmark and the profilers, so `generate.py`
+and the engine kept contiguous ownership and none of the 15% reached a served
+request. `generate.py` now applies it after loading the model, and the engine
+carries the module as `ds41f.backend.expert_placement` with an opt-in
+`ReferenceBackend(apply_placement=True)`. It is a collective (one `all_to_all` per
+layer), so every rank must call it together; the engine's single-controller
+topology is why the backend's flag is opt-in rather than default.
+
 ### Fused `hc_mixes` (implemented, off by default)
 
 `hc_mixes` computed `rsqrt(mean(x^2)+eps) * (x @ hc_fn)` in five steps over a
@@ -153,15 +167,15 @@ The kernel launches one program per 64 tokens, so it is latency-bound below abou
 0.15-0.92 ms. The caller gates on `b * s >= 4096`.
 
 It is off by default. `DSV41F_HC_MIXES_FUSED=1` enables it and takes 8K prefill
-from 3400 to 3500 tok/s (+3%), with 512 and 2048 unchanged by the gate. It is off
-because it fails one of the harness's two prefill criteria: at 8192 it reports
-`prefill_top1_agreement` 0.0, where all three runs of the configuration without
-it reported 1.0. That criterion is a mean over the 8192 prompt positions, and
-0.0 means every position's argmax moved while `prefill_max_logit_diff` stayed at
-0.93-1.00, below the 1.25 gate — so the two criteria disagree, and the logits are
-within a knife-edge of each other at this length. Both fused modes show it and
-the unfused configuration does not, so it is attributable, and the gate is not
-passed. Enabling it is a judgement call for a deployment, not a defect to fix.
+from 3400 to 3500 tok/s (+3%), with 512 and 2048 unchanged by the gate.
+
+It is off because at 8192 it reported `prefill_top1_agreement` 0.0 where all three
+runs without it reported 1.0. That criterion turned out to be a mean over a single
+prompt position (see [Noise floor](#noise-floor)), so it was one 0/1 sample, and
+the measurement that supported keeping it off was weaker than it looked. What the
+full-prompt measurement shows is that the fused path's deviation is inside the
+same-configuration noise floor at both lengths, which is the strongest evidence
+available here. Enable it if the 3% matters; it is a judgement call, not a defect.
 
 ## Serving-path changes
 
@@ -176,45 +190,54 @@ CUDA. Sampling is now batched over the emitting cohort: one device gather, one
 top-p pass, one Gumbel-max draw, one indexed device write, and a single host
 transfer. Per-row temperature and top-p are preserved.
 
-These are covered by 37 engine tests (`python -m pytest tests/` in the engine
-repository), 5 of them new. The scheduler and sampling changes are not visible in
+The single-host-transfer claim was wrong as first written: `_sample_batch` still
+had `if bool((tops < 1.0).any())` and `if bool(greedy.any())`, each of which drains
+the pipeline, so a decode step did three host round-trips. Both guards were only
+shortcuts — the top-p block is already a no-op for `tops >= 1.0` through its
+`keep | (tops >= 1.0)` clause, and `torch.where` is correct when no row is greedy —
+so they are gone and the claim now holds.
+
+These are covered by 54 engine tests (`python -m pytest tests/` in the engine
+repository), 17 of them new. The scheduler and sampling changes are not visible in
 `benchmark_ds41f.py`, which measures model-only prefill and decode.
 
 ## Noise floor
 
 The prefill output is not deterministic run to run. The grouped prefill's `_w2_m`
 accumulates with `atomic_add`, so fp32 summation order varies; near-tie expert
-selections then amplify the difference. `check_hc_mixes.py` measures this
-directly by running the same configuration twice and comparing it against the
-same run with `hc_mixes` fused:
+selections then amplify the difference. `check_prefill_parity.py` measures this
+over every prompt position at 2048, against the naive path as a control:
 
-| Length | Mode | Same setting twice | Fused off vs on |
-| --- | --- | --- | --- |
-| 2048 | tf32x3 | max 0.69, mean 0.078 | max 0.95, mean 0.146 |
-| 2048 | split | max 0.83, mean 0.134 | max 1.17, mean 0.234 |
-| 8192 | tf32x3 | max 2.83, mean 0.317 | max 1.45, mean 0.218 |
-| 8192 | split | max 2.06, mean 0.293 | max 3.14, mean 0.299 |
+| Comparison | Max abs logit diff | Top-1 agreement |
+| --- | --- | --- |
+| naive vs itself | 0.0000 | 1.000 |
+| optimized vs itself | 7.73 - 12.28 | 0.764 - 0.901 |
+| optimized vs naive | 16.29 | 0.755 - 0.857 |
 
-Both fused modes are compared at 8192 in `results/trusted-hcmixes.json` (split)
-and `results/trusted-final.json` (tf32x3).
+The naive path is bit-deterministic. The optimized path is not, and its own
+run-to-run spread is the same order as its difference from the naive path. So
+there is no fixed threshold at which whole-prompt prefill parity could be gated:
+the noise exceeds any bound that would still be informative.
 
-At 8192 the same-configuration spread already exceeds the harness's 1.25 gate, so
-`prefill_max_logit_diff` is not a usable signal at that length. The fused tf32x3
-path stays at or below the same-configuration spread; the split path does not,
-which is one reason the split path is not the default.
+`benchmark_ds41f.py` gates on the last prompt position only, because
+`Head.forward` slices `x[:, -1]` unless asked otherwise. That position is much
+more stable (0.65-1.12, top-1 1.0), so the gate passes, but it is a single sample:
+`prefill_top1_agreement` is a mean over one element and is therefore exactly 0.0
+or 1.0, not a rate over the prompt. The harness now also reports
+`prefill_max_logit_diff_full` and `prefill_top1_agreement_full` over all prompt
+positions, measured in a separate untimed pass, as diagnostics. They are not
+gated, for the reason above.
 
-The noise is not only in the logit magnitudes. `prefill_top1_agreement` is a mean
-over the prompt positions of argmax agreement between the two arms, and it is a
-knife edge at 8192: runs whose `prefill_max_logit_diff` is 1.12 report 1.0, and
-runs whose is 0.93 report 0.0. The two criteria therefore disagree at that
-length, and a change that passes one can fail the other without either number
-being informative. This is why the fused `hc_mixes` is off by default.
+The practical consequence: a prefill comparison that reports one position, or
+that reports a threshold under about 15, is not evidence that two prefill paths
+agree. `check_placement.py` and `check_hc_mixes.py` compare the same
+configuration against itself for this reason.
 
 ## Verification
 
 `benchmark_ds41f.py`'s parity gate compares its two arms inside one process. That
-catches kernel-level drift, but it cannot catch a change that both arms share.
-Three checks cover that gap:
+catches kernel-level drift, but it cannot catch a change that both arms share, and
+its prefill criterion is a single prompt position. Four checks cover those gaps:
 
 - `check_placement.py` compares the same prompt before and after applying a
   placement. Placement moves logits by at most 0.71, while two identical runs
@@ -224,9 +247,18 @@ Three checks cover that gap:
 - `check_hc_mixes.py` measures a candidate change against the same-configuration
   noise floor at the same length, instead of against the fixed gate. It was used
   to choose between the `hc_mixes` dot modes and to gate the fused path.
+- `check_prefill_parity.py` measures the whole-prompt divergence and the
+  same-configuration noise floor side by side.
 
 ## Not done
 
+- **Prefill determinism.** The grouped prefill's `_w2_m` uses `atomic_add`, which
+  makes the whole prompt nondeterministic: two identical runs differ by up to 12.3
+  on the logits with 0.76 top-1 agreement over 2048 positions. A deterministic
+  reduction (a per-expert `index_add` into a zeroed buffer, or a fixed-order
+  segmented reduction) would remove the run-to-run spread and make whole-prompt
+  parity testable. Not attempted; it is a rewrite of the hot prefill kernel for a
+  measurement benefit rather than a throughput one.
 - **Marlin kernel comparison (OPTIMIZE.md section 1).** Not attempted. It needs
   the vLLM Marlin kernels vendored and qualified against E2M1/E8M0 semantics.
 - **`_PREFILL_BF16` expert weight tables.** Implemented and left off. It is not
@@ -269,6 +301,7 @@ DSV41F_HC_MIXES_FUSED=1 $PY --nproc-per-node 4 benchmark_ds41f.py --prompt-lens 
 $PY --nproc-per-node 4 check_placement.py --placement expert_placement.pt
 $PY --nproc-per-node 4 check_hc_mixes.py --length 2048
 $PY --nproc-per-node 4 check_hc_mixes.py --length 8192
+$PY --nproc-per-node 4 check_prefill_parity.py --length 2048
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
 
 # component profiles
