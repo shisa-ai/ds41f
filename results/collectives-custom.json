@@ -1,7 +1,7 @@
 {
   "nccl_version": [
     2,
-    30,
+    29,
     7
   ],
   "algo_env": {},
@@ -14,13 +14,45 @@
       ],
       "dtype": "torch.float32",
       "MB": 0.02048,
-      "median_ms": 0.030748429708182812,
-      "min_ms": 0.029243063181638718,
-      "algbw_GBs": 0.7003370294278571,
-      "busbw_GBs": 1.0505055441417857,
-      "graph_median_ms": 0.022170948795974255,
-      "graph_min_ms": 0.02164696343243122,
-      "custom_error": "unavailable"
+      "median_ms": 0.0286793801933527,
+      "min_ms": 0.02728891558945179,
+      "algbw_GBs": 0.7504878650405699,
+      "busbw_GBs": 1.1257317975608547,
+      "graph_median_ms": 0.022253370843827724,
+      "graph_min_ms": 0.020870938897132874,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.02728891558945179,
+          0.02742605283856392,
+          0.027399975806474686,
+          0.027439091354608536
+        ],
+        "graph": [
+          0.020870938897132874,
+          0.020519830286502838,
+          0.02089305780827999,
+          0.020715175196528435
+        ],
+        "custom": [
+          0.020904000848531723,
+          0.02103508450090885,
+          0.020995037630200386,
+          0.02080504782497883
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0001501757651567459,
+      "graph_rank_spread_ms": 0.000373227521777153,
+      "custom_rank_spread_ms": 0.0002300366759300232,
+      "custom_median_ms": 0.021676532924175262,
+      "custom_min_ms": 0.020904000848531723,
+      "custom_speedup": 1.3054398431756922,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "decode_moe_bf16",
@@ -30,13 +62,45 @@
       ],
       "dtype": "torch.bfloat16",
       "MB": 0.01024,
-      "median_ms": 0.03041699528694153,
-      "min_ms": 0.028475886210799217,
-      "algbw_GBs": 0.35960250452597237,
-      "busbw_GBs": 0.5394037567889586,
-      "graph_median_ms": 0.020352075807750225,
-      "graph_min_ms": 0.019415980204939842,
-      "custom_error": "unavailable"
+      "median_ms": 0.028102542273700237,
+      "min_ms": 0.026284949854016304,
+      "algbw_GBs": 0.3895765469164607,
+      "busbw_GBs": 0.5843648203746911,
+      "graph_median_ms": 0.021358602680265903,
+      "graph_min_ms": 0.02002716064453125,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.026284949854016304,
+          0.02636294811964035,
+          0.02654106356203556,
+          0.02657296136021614
+        ],
+        "graph": [
+          0.02002716064453125,
+          0.019512837752699852,
+          0.019992003217339516,
+          0.02001202665269375
+        ],
+        "custom": [
+          0.020913081243634224,
+          0.020966865122318268,
+          0.021104002371430397,
+          0.021028099581599236
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.00028801150619983673,
+      "graph_rank_spread_ms": 0.000514322891831398,
+      "custom_rank_spread_ms": 0.0001909211277961731,
+      "custom_median_ms": 0.02159795258194208,
+      "custom_min_ms": 0.020913081243634224,
+      "custom_speedup": 1.2568664343527682,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "decode_attn_f32",
@@ -46,13 +110,45 @@
       ],
       "dtype": "torch.float32",
       "MB": 0.02048,
-      "median_ms": 0.030765892006456852,
-      "min_ms": 0.02935505472123623,
-      "algbw_GBs": 0.6976651958064388,
-      "busbw_GBs": 1.0464977937096582,
-      "graph_median_ms": 0.021561048924922943,
-      "graph_min_ms": 0.020971056073904037,
-      "custom_error": "unavailable"
+      "median_ms": 0.02886354923248291,
+      "min_ms": 0.027762027457356453,
+      "algbw_GBs": 0.7376982834361817,
+      "busbw_GBs": 1.1065474251542726,
+      "graph_median_ms": 0.022060004994273186,
+      "graph_min_ms": 0.02101808786392212,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.027762027457356453,
+          0.027554109692573547,
+          0.027861911803483963,
+          0.027525005862116814
+        ],
+        "graph": [
+          0.02101808786392212,
+          0.02079783007502556,
+          0.020801089704036713,
+          0.020775943994522095
+        ],
+        "custom": [
+          0.02077501267194748,
+          0.02071610651910305,
+          0.020781997591257095,
+          0.02079200930893421
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.00033690594136714935,
+      "graph_rank_spread_ms": 0.00024214386940002441,
+      "custom_rank_spread_ms": 7.59027898311615e-05,
+      "custom_median_ms": 0.021368148736655712,
+      "custom_min_ms": 0.02077501267194748,
+      "custom_speedup": 1.3363181960819475,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "prefill_attn_f32",
@@ -62,13 +158,41 @@
       ],
       "dtype": "torch.float32",
       "MB": 167.77216,
-      "median_ms": 0.782850431278348,
-      "min_ms": 0.7726319599896669,
-      "algbw_GBs": 217.14369672495008,
-      "busbw_GBs": 325.7155450874251,
-      "graph_median_ms": 0.7707044715061784,
-      "graph_min_ms": 0.7651119958609343,
-      "custom_error": "unavailable"
+      "median_ms": 0.7785559864714742,
+      "min_ms": 0.77245500870049,
+      "algbw_GBs": 217.19343924281756,
+      "busbw_GBs": 325.7901588642263,
+      "graph_median_ms": 0.7705269381403923,
+      "graph_min_ms": 0.7632218766957521,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.77245500870049,
+          0.7715399842709303,
+          0.7717269472777843,
+          0.7735260296612978
+        ],
+        "graph": [
+          0.7632218766957521,
+          0.7598069496452808,
+          0.7626758888363838,
+          0.7647830061614513
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.001986045390367508,
+      "graph_rank_spread_ms": 0.004976056516170502,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "prefill_attn_bf16",
@@ -78,13 +202,41 @@
       ],
       "dtype": "torch.bfloat16",
       "MB": 83.88608,
-      "median_ms": 0.4139050142839551,
-      "min_ms": 0.404988881200552,
-      "algbw_GBs": 207.13181001741947,
-      "busbw_GBs": 310.69771502612923,
-      "graph_median_ms": 0.40362204890698195,
-      "graph_min_ms": 0.3973089624196291,
-      "custom_error": "unavailable"
+      "median_ms": 0.41164655704051256,
+      "min_ms": 0.4054899327456951,
+      "algbw_GBs": 206.87586355592595,
+      "busbw_GBs": 310.31379533388895,
+      "graph_median_ms": 0.40553847793489695,
+      "graph_min_ms": 0.3985490184277296,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.4054899327456951,
+          0.4037930630147457,
+          0.40268106386065483,
+          0.40299096144735813
+        ],
+        "graph": [
+          0.3985490184277296,
+          0.3988519310951233,
+          0.400373013690114,
+          0.39792805910110474
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.002808868885040283,
+      "graph_rank_spread_ms": 0.002444954589009285,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "prefill_mid_f32",
@@ -94,13 +246,41 @@
       ],
       "dtype": "torch.float32",
       "MB": 41.94304,
-      "median_ms": 0.23082946427166462,
-      "min_ms": 0.22512394934892654,
-      "algbw_GBs": 186.31087505928207,
-      "busbw_GBs": 279.4663125889231,
-      "graph_median_ms": 0.2197885187342763,
-      "graph_min_ms": 0.2161320298910141,
-      "custom_error": "unavailable"
+      "median_ms": 0.2265634248033166,
+      "min_ms": 0.22124010138213634,
+      "algbw_GBs": 189.58154393336676,
+      "busbw_GBs": 284.3723159000501,
+      "graph_median_ms": 0.2192090032622218,
+      "graph_min_ms": 0.2155990805476904,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.22124010138213634,
+          0.22200983949005604,
+          0.2190049272030592,
+          0.2205988857895136
+        ],
+        "graph": [
+          0.2155990805476904,
+          0.2159997820854187,
+          0.2135802060365677,
+          0.2143669407814741
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0030049122869968414,
+      "graph_rank_spread_ms": 0.002419576048851013,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "engram_bf16",
@@ -110,13 +290,45 @@
       ],
       "dtype": "torch.bfloat16",
       "MB": 4.194304,
-      "median_ms": 0.05874352063983679,
-      "min_ms": 0.05719298496842384,
-      "algbw_GBs": 73.33598696266104,
-      "busbw_GBs": 110.00398044399157,
-      "graph_median_ms": 0.04885613452643156,
-      "graph_min_ms": 0.04779198206961155,
-      "custom_error": "unavailable"
+      "median_ms": 0.05699147004634142,
+      "min_ms": 0.05522998981177807,
+      "algbw_GBs": 75.94250902985942,
+      "busbw_GBs": 113.91376354478913,
+      "graph_median_ms": 0.04907592665404081,
+      "graph_min_ms": 0.04788604564964771,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.05522998981177807,
+          0.05519017577171326,
+          0.05559599958360195,
+          0.055514974519610405
+        ],
+        "graph": [
+          0.04788604564964771,
+          0.047631096094846725,
+          0.04774308763444424,
+          0.048012007027864456
+        ],
+        "custom": [
+          0.04582502879202366,
+          0.04616403020918369,
+          0.0459509901702404,
+          0.045525841414928436
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.00040582381188869476,
+      "graph_rank_spread_ms": 0.0003809109330177307,
+      "custom_rank_spread_ms": 0.0006381887942552567,
+      "custom_median_ms": 0.04733353853225708,
+      "custom_min_ms": 0.04582502879202366,
+      "custom_speedup": 1.2052363362920886,
+      "flashinfer_error": "unavailable"
     },
     {
       "name": "indexer_f32",
@@ -126,14 +338,45 @@
       ],
       "dtype": "torch.float32",
       "MB": 16.777216,
-      "median_ms": 0.11422147508710623,
-      "min_ms": 0.10979315266013145,
-      "algbw_GBs": 152.807489297028,
-      "busbw_GBs": 229.211233945542,
-      "graph_median_ms": 0.10415702126920223,
-      "graph_min_ms": 0.10171509347856045,
-      "custom_error": "unavailable"
+      "median_ms": 0.11125393211841583,
+      "min_ms": 0.10949303396046162,
+      "algbw_GBs": 153.22633224373268,
+      "busbw_GBs": 229.839498365599,
+      "graph_median_ms": 0.1038530608639121,
+      "graph_min_ms": 0.10094488970935345,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.10949303396046162,
+          0.10948395356535912,
+          0.10967091657221317,
+          0.10932283475995064
+        ],
+        "graph": [
+          0.10094488970935345,
+          0.10169809684157372,
+          0.10154815390706062,
+          0.101905083283782
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0003480818122625351,
+      "graph_rank_spread_ms": 0.0009601935744285583,
+      "flashinfer_error": "unavailable"
     }
   ],
-  "custom_error": "ModuleNotFoundError(\"No module named 'vllm'\")"
+  "custom_backend": "custom_allreduce+symm_mem",
+  "custom_available": true,
+  "custom_disabled_reason": null,
+  "flashinfer_error": "AssertionError('distributed environment is not initialized')"
 }

@@ -5,7 +5,7 @@ measured, and what is still open. It is **not** a complete implementation of tha
 list — see [Scope and status](#scope-and-status) before reading the numbers as a
 progress figure.
 
-All numbers come from `benchmark_ds41f.py` on GPU0-3 (4 x H20-3e, TP=4) with
+The tuning-pass comparison comes from `benchmark_ds41f.py` on GPU0-3 (4 x H20-3e, TP=4) with
 `DSV41F_ENGRAM_OFFLOAD=1`. That harness alternates the two arms, restores a
 buffer snapshot before each arm, repeats, and reports the worst rank. The tables
 below use its optimized arm. Prompt tokens are random ids.
@@ -22,7 +22,7 @@ MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, and two serving-path fixes (symmetric length
 bucketing, batched on-device sampling).
 
-Not done, in rough order of expected impact:
+Remaining work and follow-up status:
 
 | Item | State |
 | --- | --- |
@@ -30,23 +30,43 @@ Not done, in rough order of expected impact:
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
-| DSpark feasibility spike | Deferred wholesale, including the early spike. |
-| Custom / symmetric-memory collectives | Not measured. NCCL only; see [Collectives](#collectives). |
+| DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
+| Custom / symmetric-memory collectives | The original pass measured NCCL only. Follow-up experiments are in progress; an end-to-end gain is not established. See [Collectives](#collectives). |
 | Deterministic prefill | Not attempted. See [Noise floor](#noise-floor). |
 
-## Results
+## Latest saved model measurements
+
+The newer `results/fulllogits-hcmixes-off.json` contains the following averages
+of two optimized runs. It is marked **failed** on correctness checks; these
+numbers describe execution time, not a validated release. The full-prompt score
+comparison runs separately from the timed prompt-processing pass.
+
+| Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
+| --- | ---: | ---: | ---: | ---: |
+| 2,048 tokens | 2,560 tok/s | 0.80 s | 30.62 tok/s | 32.66 ms/token |
+| 8,192 tokens | 3,270 tok/s | 2.51 s | 29.29 tok/s | 34.20 ms/token |
+
+These are model-only measurements on random-token prompts with predetermined
+continuation tokens. Fresh end-to-end serving throughput and peak memory are not
+recorded. The historical tuning comparison below uses an earlier run and must
+not be described as the latest measurement.
+
+## Tuning-pass comparison (earlier measurements)
 
 | Workload | Before | After | Change |
 | --- | --- | --- | --- |
-| Decode, 2048 context | 44.65 ms/token | 32.46 ms/token | −27.3% |
-| Decode throughput | 22.40 tok/s | 30.81 tok/s | +37.6% |
-| Prefill 512 | 1071 tok/s | 1330 tok/s | +24% |
-| Prefill 2048 | 1684 tok/s | 2580 tok/s | +53% |
-| Prefill 8192 | 1948 tok/s | 3392 tok/s | +74% |
+| Decode, 2048 context | 44.81 ms/token | 32.46 ms/token | −27.6% |
+| Decode throughput | 22.32 tok/s | 30.81 tok/s | +38.1% |
+| Prefill 512 | 1071 tok/s | 1330 tok/s | +24.1% |
+| Prefill 2048 | 1684 tok/s | 2580 tok/s | +53.2% |
+| Prefill 8192 | 1948 tok/s | 3392 tok/s | +74.1% |
 
 Before is `results/baseline-gpu0123.json`, the same harness on the same GPU set
 before any of this work. After is `results/trusted-shipped.json`; both are the
 mean of two repeats, and the two repeats are within 1.5% of each other.
+The before decode figures have been corrected to the two-repeat 2048-token
+average in that file. The previously quoted 44.65 ms/token and 22.40 tok/s were
+an earlier comparison point, not that average. Percentages use unrounded values.
 
 The decode row is the well-supported number: it is measured on a path whose two
 arms are compared from the same restored state, so the comparison isolates the
@@ -54,15 +74,18 @@ decode kernels. The prefill rows are less well supported — see
 [Noise floor](#noise-floor) and [What the harness does and does not
 show](#what-the-harness-does-and-does-not-show).
 
-Every parity criterion passes on every row: `top1_agreement` 1.0,
+In `trusted-shipped.json`, every recorded parity criterion passes on every row: `top1_agreement` 1.0,
 `prefill_top1_agreement` 1.0, `max_logit_diff` 0.0, and
 `prefill_max_logit_diff` 0.65-1.12 against its 1.25 gate.
 
 Those prefill numbers are last-position only, and that is a weak signal — see
 [Noise floor](#noise-floor). Measured over the whole prompt, the optimized and
-naive arms differ by up to 16.3 with 0.76 top-1 agreement. That is not a defect in
-the optimized path: two runs of the *same* optimized configuration differ by up to
-12.3 with 0.76 agreement, while the naive arm is bit-deterministic at 0.0000.
+naive arms differ by up to 16.3 with 0.76 top-1 agreement. Two runs of the *same*
+optimized configuration differ by up to 12.3 with 0.76 agreement, while the naive
+arm is bit-deterministic at 0.0000. That variation does not establish correctness
+or rule out defects. Independent state checks and realistic quality tests remain
+necessary. The saved `fulllogits-hcmixes-off.json` report is marked `failed`;
+its measurements must not be presented as a passing full-prompt comparison.
 
 ## Decode changes
 
@@ -203,7 +226,8 @@ prompt position (see [Noise floor](#noise-floor)), so it was one 0/1 sample, and
 the measurement that supported keeping it off was weaker than it looked. What the
 full-prompt measurement shows is that the fused path's deviation is inside the
 same-configuration noise floor at both lengths, which is the strongest evidence
-available here. Enable it if the 3% matters; it is a judgement call, not a defect.
+available here. This does not establish correctness. Keep it disabled until
+independent state and quality checks pass, as required by OPTIMIZE.md.
 
 Note that this kernel sits in **both** harness arms, so the harness's parity gate
 cannot see it either way — the same is true of every change in this document
@@ -264,8 +288,8 @@ greedy-only cohort leaves `torch.get_rng_state()` unchanged, a mixed cohort
 advances it by exactly `stochastic_rows * vocab`, and `top_p=1.0` samples
 identically to `top_p=0.999999`.
 
-These are covered by 67 engine tests (`python -m pytest tests/` in the engine
-repository), 24 of them new. The scheduler and sampling changes are not visible in
+The current engine suite passes 79 tests (`python -m pytest -q`, September 13).
+The scheduler and sampling changes are not visible in
 `benchmark_ds41f.py`, which measures model-only prefill and decode.
 
 ## Collectives
@@ -278,16 +302,45 @@ call was rank waiting rather than transport, which the expert placement removed
 algorithm/protocol combination sits at ~31 us eager and ~21 us graphed, which is
 launch latency rather than transport, so no NCCL algorithm choice helps.
 
-**No alternative backend was measured.** The script's `--custom` flag used to
-construct vLLM's `CustomAllreduce` and print `car.disabled`, establishing
-availability and nothing else; the writeup then described alternatives as
-benchmarked, which was not supported. It now times the communicator per shape and
-checks the result against NCCL (`custom_min_ms`, `custom_speedup`,
-`custom_error`), but vLLM is not installed in this environment, so every row
-records `custom_error: "unavailable"` and the comparison remains open. FlashInfer
-and a symmetric-memory path are not implemented at all. The claim that similar
-NCCL latency rules out other backends is not established: at 20 KB the cost is
-launch overhead, which a different backend could plausibly reduce.
+**An alternative backend is now measured, and it does not win under graph
+replay.** `--custom` attaches vLLM's `CustomAllreduce` with symmetric memory and
+times it against NCCL per shape, with a numerical check against NCCL and per-rank
+minima (`results/collectives-custom.json`). Two harness gaps had to be fixed
+first. The communicator asserts unless it is attached to a non-NCCL group (vLLM
+gives it a separate gloo group for the IPC handshake), and `custom_all_reduce`
+returns `None` above its 8 MiB buffer, which is now recorded as
+`unsupported_at_this_size` rather than an error.
+
+| Shape | NCCL eager | NCCL graphed | Custom+symm | Custom vs eager |
+| --- | ---: | ---: | ---: | ---: |
+| decode MoE fp32, 20 KB | 27.3 us | 20.9 us | 20.9 us | 1.31x |
+| decode MoE bf16, 10 KB | 26.3 us | 20.0 us | 20.9 us | 1.26x |
+| decode attn fp32, 20 KB | 27.8 us | 21.0 us | 20.8 us | 1.34x |
+| Engram bf16, 4.2 MB | 55.2 us | 47.9 us | 45.8 us | 1.21x |
+| prefill / indexer, >= 16.8 MB | 110-773 us | 101-763 us | unsupported | — |
+
+The decode-sized speedup is over *eager* NCCL only. Custom (~20.9 us) is within
+noise of graph-replayed NCCL (~20.9 us), and the engine captures its decode
+collectives, so switching backend would not move the graphed step. That supports
+the earlier reading that the 20 KB cost is launch overhead: removing the launch
+(custom, or a CUDA graph) recovers the same ~7 us, and doing both gains nothing.
+For the prefill-sized reductions custom allreduce declines at its default buffer,
+so NCCL remains the only path there.
+
+Three limits are now recorded rather than assumed:
+
+- Custom allreduce is **not CUDA-graph-capturable**: capturing
+  `custom_all_reduce` aborts the process (SIGABRT, not a Python exception), so the
+  graphed serving path cannot use it. The harness only attempts capture under
+  `DSV41F_BENCH_CUSTOM_GRAPH=1`.
+- Per-rank minima differ by under 4 us on every shape (`*_rank_spread_ms`), so
+  this microbenchmark does not see the rank skew that dominated the real 8K
+  prefill wait. It bounds rank timing spread under a barrier, not arrival skew.
+- **FlashInfer was not measured.** Its import needs the `vllm-ds41f` env's
+  `libstdc++` on `LD_LIBRARY_PATH` (the system one lacks `CXXABI_1.3.15`), and
+  `FlashInferAllReduce` then asserts `distributed environment is not initialized`
+  because it requires vLLM's own `parallel_state` init, which this standalone
+  harness does not perform. That is an integration task, not a result.
 
 ## What the harness does and does not show
 
@@ -318,8 +371,8 @@ correctness gates in OPTIMIZE.md ask for.
 
 ## Engram lookup cost
 
-With `DSV41F_ENGRAM_OFFLOAD=1` the two n-gram tables are CPU-resident (they do not
-fit on the GPU alongside the weights), so every Engram layer runs `_gather_cpu`:
+With `DSV41F_ENGRAM_OFFLOAD=1` the two n-gram tables are CPU-resident, so every
+Engram layer runs `_gather_cpu`:
 indices go D2H, rows are gathered and dequantized on the CPU, and the result comes
 back H2D. The D2H copy is synchronous, so that sequence is exposed in the step
 rather than overlapped. `profile_engram.py` measures it directly
@@ -334,10 +387,12 @@ rather than overlapped. `profile_engram.py` measures it directly
 | Share of the decode step | 1.40% |
 | Instrumentation overhead | 0.052 ms (0.16%) |
 
-The instrumentation is a sync plus two `perf_counter` reads per call, so the
-overhead column bounds its own error. At 1.4% this is real but not the bottleneck,
-which also bounds the prize: even eliminating the lookup entirely cannot move
-decode by more than about 1.4%, so it does not explain the gap to vLLM.
+The measurement adds synchronization and timing calls. The instrumented run was
+0.052 ms slower per step; this difference is not a formal error bound. The
+measured lookup accounts for about 1.4% of this B=1 decode workload. Eliminating
+that measured cost alone would have a small effect; it does not explain the
+reported gap to vLLM. This is not a comparison of offload enabled versus disabled,
+and does not establish the cost for prefill or larger batches.
 
 ## Noise floor
 
@@ -353,23 +408,26 @@ over every prompt position at 2048, against the naive path as a control:
 | optimized vs naive | 16.29 | 0.755 - 0.857 |
 
 The naive path is bit-deterministic. The optimized path is not, and its own
-run-to-run spread is the same order as its difference from the naive path. So
-there is no fixed threshold at which whole-prompt prefill parity could be gated:
-the noise exceeds any bound that would still be informative.
+run-to-run spread is the same order as its difference from the naive path. The
+current measurements therefore do not establish full-prompt equivalence. Reduce
+the nondeterminism and use independent state and quality checks; do not raise a
+correctness threshold merely to accommodate the observed variation.
 
-`benchmark_ds41f.py` gates on the last prompt position only, because
-`Head.forward` slices `x[:, -1]` unless asked otherwise. That position is much
-more stable (0.65-1.12, top-1 1.0), so the gate passes, but it is a single sample:
+The current `benchmark_ds41f.py` gates on the last prompt position only, because
+`Head.forward` slices `x[:, -1]` unless asked otherwise. In `trusted-shipped.json`,
+that position passed (0.65-1.12, top-1 1.0), but it is a single sample:
 `prefill_top1_agreement` is a mean over one element and is therefore exactly 0.0
 or 1.0, not a rate over the prompt. The harness now also reports
 `prefill_max_logit_diff_full` and `prefill_top1_agreement_full` over all prompt
-positions, measured in a separate untimed pass, as diagnostics. They are not
-gated, for the reason above.
+positions, measured in a separate untimed pass, as diagnostics. The current
+script does not gate those fields. The earlier saved full-prompt report is marked
+failed, and one of its last-position differences also exceeds 1.25. A later
+change to the script's checks does not make that saved report pass.
 
-The practical consequence: a prefill comparison that reports one position, or
-that reports a threshold under about 15, is not evidence that two prefill paths
-agree. `check_placement.py` and `check_hc_mixes.py` compare the same
-configuration against itself for this reason.
+The practical consequence: agreement at one position is insufficient evidence
+that two prefill paths agree. `check_placement.py` and `check_hc_mixes.py` also
+compare repeated runs of the same configuration, but those controls do not
+replace full-model correctness checks.
 
 ## Verification
 
@@ -405,7 +463,7 @@ experts. A recorded example is `results/manifest-shipped.json`
   reduction (a per-expert `index_add` into a zeroed buffer, or a fixed-order
   segmented reduction) would remove the run-to-run spread and make whole-prompt
   parity testable. Not attempted; it is a rewrite of the hot prefill kernel for a
-  measurement benefit rather than a throughput one.
+  correctness and measurement benefit; its throughput effect is unmeasured.
 - **Marlin kernel comparison (OPTIMIZE.md section 1).** Not attempted. It needs
   the vLLM Marlin kernels vendored and qualified against E2M1/E8M0 semantics.
   The FP8 GEMV/GEMM comparison in [Decode changes](#decode-changes) is a different
@@ -424,9 +482,11 @@ experts. A recorded example is `results/manifest-shipped.json`
   (2%). It selects experts, so changing its precision changes which experts run,
   not just the values. Not attempted; the same fused approach used for `hc_mixes`
   would apply, but the sensitivity is higher and the prize is smaller.
-- **Custom or symmetric-memory collectives (section 2).** NCCL only; the custom
-  path is implemented in `bench_collectives.py` but vLLM is not installed here, so
-  it was not measured. See [Collectives](#collectives).
+- **Custom or symmetric-memory collectives (section 2).** Measured: custom
+  allreduce + symmetric memory is 1.2-1.34x faster than eager NCCL at
+  decode-sized messages, ties graph-replayed NCCL, is not graph-capturable, and is
+  unsupported above its 8 MiB buffer. FlashInfer was not measured. See
+  [Collectives](#collectives).
 - **DSpark integration (section 5), Engram GPU lookup (section 6), continuous
   admission (section 8), EP or pipeline topology (section 9).** Out of scope for
   this pass.
@@ -466,9 +526,11 @@ $PY --nproc-per-node 4 profile_prefill_ops.py
 $PY --nproc-per-node 4 diag_balance.py
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 profile_engram.py
 
-# collectives; --custom needs vllm installed, and records per-shape custom_error
-# otherwise (every row here, since it is not installed in this environment)
-torchrun --nproc-per-node 4 bench_collectives.py --custom
+# collectives; --custom measures vLLM's custom allreduce. Needs the vllm-ds41f env
+# and its libstdc++ on LD_LIBRARY_PATH (the system one lacks CXXABI_1.3.15).
+LD_LIBRARY_PATH=/root/miniforge3/envs/vllm-ds41f/lib:$LD_LIBRARY_PATH \
+  /root/miniforge3/envs/vllm-ds41f/bin/torchrun --nproc-per-node 4 \
+  bench_collectives.py --custom --output /root/ds41f/results/collectives-custom.json
 
 # provenance: pin revisions, source/config hashes, checkpoint and placement
 python -m ds41f.manifest --out results/manifest.json \
