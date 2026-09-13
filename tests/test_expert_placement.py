@@ -319,7 +319,12 @@ def test_maybe_apply_honours_an_explicit_path(tmp_path, monkeypatch):
     """
     monkeypatch.delenv("DSV41F_EXPERT_PLACEMENT", raising=False)
     seen = []
-    monkeypatch.setattr(ep, "apply", lambda m, p, r, w, verbose=False: seen.append(p))
+
+    def _stub_apply(m, p, r, w, verbose=False, audit=False):
+        seen.append(p)
+        return {"file": p, "layers": [], "gate_permuted": True, "exchange_ok": True} if audit else None
+
+    monkeypatch.setattr(ep, "apply", _stub_apply)
     model = _StubModel(1, 4, 3)
     path = tmp_path / "explicit.pt"
     path.write_bytes(b"")  # never loaded; apply is stubbed
@@ -327,12 +332,18 @@ def test_maybe_apply_honours_an_explicit_path(tmp_path, monkeypatch):
     # explicit path wins over the (absent) package-adjacent default
     assert ep.maybe_apply(model, rank=0, world=4, path=str(path)) is True
     assert seen == [str(path)]
+    assert model.placement_audit is None  # audit off by default
 
-    # and "none" passed explicitly still disables it
+    # audit=True records the placement summary on the model for a verifier to read
+    assert ep.maybe_apply(model, rank=0, world=4, path=str(path), audit=True) is True
+    assert model.placement_audit["gate_permuted"] is True
+
+    # and "none" passed explicitly still disables it, clearing the audit
     assert ep.maybe_apply(model, rank=0, world=4, path="none") is False
-    assert seen == [str(path)]
+    assert model.placement_audit is None
+    assert seen == [str(path), str(path)]
 
     # the environment variable is still honoured when no path is given
     monkeypatch.setenv("DSV41F_EXPERT_PLACEMENT", str(path))
     assert ep.maybe_apply(model, rank=0, world=4) is True
-    assert seen == [str(path), str(path)]
+    assert seen == [str(path), str(path), str(path)]

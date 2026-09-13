@@ -124,6 +124,14 @@ def _pack(ex) -> torch.Tensor:
     return torch.cat([_bytes(t) for t in _expert_tensors(ex)])
 
 
+def _expert_sha256(ex) -> str:
+    """Content hash of one expert's packed bytes (audit only; forces a D2H copy)."""
+    h = hashlib.sha256()
+    for t in _expert_tensors(ex):
+        h.update(_bytes(t).detach().cpu().numpy().tobytes())
+    return h.hexdigest()
+
+
 def _unpack_into(buf: torch.Tensor, off: int, ex) -> int:
     for t in _expert_tensors(ex):
         b = _bytes(t)
@@ -224,10 +232,24 @@ def check_expected_hash(info: dict, expected: str | None) -> None:
 
 
 @torch.no_grad()
-def apply(model, placement_path: str, rank: int, world: int, verbose: bool = False) -> None:
+def apply(
+    model,
+    placement_path: str,
+    rank: int,
+    world: int,
+    verbose: bool = False,
+    audit: bool = False,
+) -> dict | None:
     """Permute gates and redistribute experts in place. Call before any forward.
 
     Collective: every rank in the TP group must call it with the same path.
+
+    With ``audit=True`` it also checks its own work and returns a summary: for each
+    MoE layer, whether the gate really is the pre-permutation gate reordered by
+    ``new_to_old``, whether every local expert slot holds the bytes of the expert
+    that ``exchange_plan`` assigned to it (verified against hashes gathered from
+    the source rank), and the global expert ids this rank now holds. The check
+    costs a D2H copy and a hash of every expert, so it is off by default.
     """
     info = fingerprint(placement_path)
     check_expected_hash(info, expected_sha256())
@@ -240,6 +262,7 @@ def apply(model, placement_path: str, rank: int, world: int, verbose: bool = Fal
     blob = torch.load(placement_path, map_location="cpu", weights_only=True)
     n2o_all = blob["new_to_old"].long()
     dev = torch.cuda.current_device()
+    audit_layers: list[dict] | None = [] if audit else None
 
     # A calibration is per-checkpoint. Applying one from a different checkpoint would
     # silently mislabel experts (or index out of range), so check the shape and that
@@ -267,9 +290,13 @@ def apply(model, placement_path: str, rank: int, world: int, verbose: bool = Fal
                 f"0..{n_experts - 1} (calibration is from another checkpoint?)"
             )
 
-        permute_gate(moe.gate, n2o)
-
         mine, dest, want, src = exchange_plan(n2o, rank, world)
+        if audit:
+            gate_pre = moe.gate.weight.detach().clone()
+            pre_hashes = {int(e): _expert_sha256(moe.experts[int(e)]) for e in mine.tolist()}
+        permute_gate(moe.gate, n2o)
+        if audit:
+            gate_ok = bool(torch.equal(moe.gate.weight.detach(), gate_pre[n2o]))
         per_expert = _pack(moe.experts[int(mine[0])]).numel()
         send = []
         for d in range(world):
@@ -289,10 +316,41 @@ def apply(model, placement_path: str, rank: int, world: int, verbose: bool = Fal
             off = 0
             for j in (src == s).nonzero().flatten().tolist():
                 off = _unpack_into(buf, off, moe.experts[rank * n_local + j])
+        if audit:
+            # Every rank publishes the hashes of the experts it held before the
+            # exchange; each local slot must now hold the bytes of the expert that
+            # exchange_plan assigned to it. This checks the model's actual tensors,
+            # not just that apply() was called.
+            gathered = [None] * world
+            dist.all_gather_object(gathered, pre_hashes)
+            merged: dict[int, str] = {}
+            for d in gathered:
+                merged.update(d)
+            exchange_ok = all(
+                _expert_sha256(moe.experts[rank * n_local + j]) == merged[int(want[j])]
+                for j in range(n_local)
+            )
+            audit_layers.append(
+                {
+                    "layer": layer_id,
+                    "gate_permuted": gate_ok,
+                    "exchange_ok": exchange_ok,
+                    "local_experts": [int(x) for x in want.tolist()],
+                }
+            )
         if verbose and rank == 0:
             print(f"  [placement] layer {layer_id} redistributed")
     if verbose and rank == 0:
         print(f"  [placement] applied {placement_path}")
+    if audit:
+        return {
+            "file": info["path"],
+            "sha256": info["sha256"],
+            "layers": audit_layers,
+            "gate_permuted": all(layer["gate_permuted"] for layer in audit_layers),
+            "exchange_ok": all(layer["exchange_ok"] for layer in audit_layers),
+        }
+    return None
 
 
 def _rank_world() -> tuple[int, int]:
@@ -301,7 +359,13 @@ def _rank_world() -> tuple[int, int]:
     return 0, 1
 
 
-def maybe_apply(model, rank: int | None = None, world: int | None = None, path: str | None = None) -> bool:
+def maybe_apply(
+    model,
+    rank: int | None = None,
+    world: int | None = None,
+    path: str | None = None,
+    audit: bool = False,
+) -> bool:
     """Apply a balanced placement if one is configured. Returns whether it ran.
 
     ``DSV41F_EXPERT_PLACEMENT`` names the file; "none" (or "0") disables it. When
@@ -316,12 +380,17 @@ def maybe_apply(model, rank: int | None = None, world: int | None = None, path: 
 
     Must be called on every rank together, after the model is loaded and before the
     first forward. ``rank``/``world`` default to the active process group.
+
+    With ``audit=True`` the returned placement summary is stored on
+    ``model.placement_audit`` (see :func:`apply`); it is ``None`` when placement did
+    not run.
     """
     if rank is None or world is None:
         r, w = _rank_world()
         rank = r if rank is None else rank
         world = w if world is None else world
     if world <= 1:
+        model.placement_audit = None
         return False
     if path is None:
         path = os.environ.get("DSV41F_EXPERT_PLACEMENT")
@@ -331,8 +400,9 @@ def maybe_apply(model, rank: int | None = None, world: int | None = None, path: 
     if path is not None and path.lower() in ("", "none", "0"):
         path = None
     if not path:
+        model.placement_audit = None
         return False
-    apply(model, path, rank, world, verbose=(rank == 0))
+    model.placement_audit = apply(model, path, rank, world, verbose=(rank == 0), audit=audit)
     return True
 
 
