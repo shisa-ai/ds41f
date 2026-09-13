@@ -43,6 +43,7 @@ Remaining work and follow-up status:
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | Decode rotary embedding | **Fused, 2.3% lower decode latency at identical tokens.** The largest single unfused item in the step's op attribution (0.68 ms/step of `copy_` and `mul`), called 198 times per step in three launches each. One launch per call now, bit-identical to the reference at the contracted product form. Decode only; prefill is untouched. See [Fused rotary embedding](#fused-rotary-embedding). |
 | Cached fp32 gate weight | **Cached, 1.65% lower decode latency at identical tokens.** The gate GEMV runs in fp32, so `Gate.forward` upcast the bf16 routing weight on every one of 40 layers of every step: exact, but 8.5 µs of GPU time per layer for a constant. 27.540 -> 27.085 ms/step. The attribution that found it needed the MoE's own decode graph bypassed, which is why the kernel-name view had the routing at 0.67 ms/step rather than 1.46. See [Caching the routing weight cast](#caching-the-routing-weight-cast). |
+| Shared-expert SwiGLU tail | **Fused, 1.67% lower decode latency at identical tokens.** Seven launches per layer for a `[1, 2304]` tensor (two casts, two clamps, silu, multiply, cast back), 0.397 ms/step. The routed experts already compute the same expression in one launch, so that kernel is reused, with `weights=None` to skip the multiply. 27.053 -> 26.602 ms/step, 240 launches/step fewer. See [Fusing the shared expert's SwiGLU tail](#fusing-the-shared-experts-swiglu-tail). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
@@ -641,6 +642,7 @@ The checks are listed in [Verification](#verification).
 | **All three together** | | | **1,674** | **+3.883** | **11.9% lower** | **identical** |
 | Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
 | Cached fp32 gate weight | 1 cast/layer | 0/layer | 40 | +0.456 | +1.65% | identical |
+| Fused shared-expert SwiGLU tail | 7/layer | 1/layer | 240 | +0.450 | +1.67% | identical |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
@@ -924,6 +926,45 @@ Interleaved A/B, four repeats: **27.085 ms/step cached against 27.540 uncached,
 +0.456 ms/step (+1.65%)**, identical tokens. `DSV41F_GATE_WEIGHT_CACHE=0` restores
 the uncached expression, for a caller that changes the weight by a route the
 invalidation does not see.
+
+### Fusing the shared expert's SwiGLU tail
+
+The [attribution](#attributing-launches-to-the-function-that-issued-them) named
+`Expert.forward` at 0.397 ms/step, and re-profiling with the MoE's decode graph
+bypassed is what split it: `aten::copy_` 0.220, `aten::clamp` 0.088,
+`aten::silu` 0.051, `aten::mul` 0.038. Seven launches per layer, for a `[1, 2304]`
+tensor -- the group whose median kernel is 1.82 µs, so this is launch overhead.
+
+`Expert.forward` and the routed experts compute the *same* expression:
+
+```python
+# Expert.forward (the shared expert)        # GroupedExperts.routed, already fused
+gate = self.w1(x).float()                   g = gate.float()
+up = self.w3(x).float()                     u = up.float()
+up = clamp(up, -L, L); gate = clamp(gate, max=L)   g = clamp(g, max=L); u = clamp(u, -L, L)
+(F.silu(gate) * up).to(dtype)               (F.silu(g) * u * w).to(bf16)
+```
+
+So the routed path's kernel is reused rather than rewritten, which matters because
+the two findings that took it there are in it: **`libdevice.exp` is what
+`torch.exp` lowers to and `tl.exp` is not**, and the fp32 division needs
+`ieee_rounding`. `swiglu_route` gains `weights=None`, which skips the multiply
+instead of loading a ones tensor -- an exact 1.0 multiplies to the same value, so
+that is a launch saved and not a numeric change.
+
+`check_expert_swiglu_exact.py` covers this shape the way
+`check_moe_swiglu_exact.py` covers the routed one, and adds `limit=0`, where the
+reference skips the clamps entirely: **0 of 138,240 bf16 elements** differ, over
+random draws, inputs pinned to the clamp and one ulp either side of it, and
+saturating inputs where silu's `exp` overflows. The routed check still passes, which
+the new constexpr must not have disturbed.
+
+Interleaved A/B, four repeats: **26.602 ms/step fused against 27.053 unfused,
++0.450 ms/step (+1.67%)**, identical tokens, and 240 launches/step fewer. Real-model
+parity is prefill logits bit-equal over 66,191,360 values and no differing token in
+64 steps. `DSV41F_EXPERT_SWIGLU_FUSED=0` restores the reference chain. Decode only:
+at prefill the same seven launches are amortised over the whole prompt, and the
+last-position parity gate is sensitive to prefill changes.
 
 ### Why the reductions stayed in torch
 
@@ -1580,6 +1621,12 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   fused `hc_mixes` coefficient math at decode (0 of 4,800 fp32 elements differ over
   200 draws at four seeds), and `check_act_quant_cache.py` does the same for the cached
   `act_quant` path (0 differing bytes over 3 reps x 3 shapes).
+- `check_expert_swiglu_exact.py` gates the fused shared-expert SwiGLU tail. It
+  covers the shape that differs from the routed experts' (`check_moe_swiglu_exact.py`)
+  -- one row, no routing weight, and `limit=0` as well as the real limit, where the
+  reference skips the clamps -- and gets 0 of 138,240 bf16 elements differing, over
+  random draws, inputs pinned to the clamp and one ulp either side of it, and
+  saturating inputs where silu's `exp` overflows.
 - `check_gate_weight_cache.py` covers the one decode change that is exact by
   construction and so has no numeric gate: the cached fp32 routing weight. It
   compares bit patterns against the uncached expression after each way the weight
