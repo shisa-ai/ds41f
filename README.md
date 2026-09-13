@@ -8,8 +8,8 @@ for the [reference inference implementation](https://huggingface.co/deepseek-ai/
 As of September 13, 2026:
 
 - The reference backend and the external four-GPU HTTP/SSE server are implemented.
-- The saved run in [`results/trusted-shipped.json`](results/trusted-shipped.json) passes the parity gate: 30.81 tok/s decode at 2K context and 3,392 tok/s prefill at 8K, on four H20-3e GPUs.
-- Whole-prompt prompt-processing parity is unresolved. Quality on realistic tasks and performance with concurrent requests are unvalidated.
+- The saved run in [`results/trusted-fused.json`](results/trusted-fused.json) passes the parity gate on all six rows (`top1_agreement` 1.0, `max_logit_diff` 0.0): 35.5 tok/s decode and 3,370 tok/s prefill at 8K context, on four H20-3e GPUs. The previous run, [`results/trusted-shipped.json`](results/trusted-shipped.json), is the pre-fusion baseline at 30.7 tok/s decode and 3,392 tok/s prefill.
+- Whole-prompt prompt-processing parity is unresolved. Quality on realistic tasks is unvalidated, and concurrent requests are measured but not explained: throughput falls above concurrency 2.
 - The engine is experimental. [Limits](#limits) lists what the measurements do not cover.
 
 Measurements are in the [optimization results](docs/OPTIMIZE-RESULTS.md); the work plan is in [OPTIMIZE.md](docs/OPTIMIZE.md).
@@ -96,26 +96,49 @@ need their own measurements.
 ## Performance
 
 One request, four GPUs, text only. Averages of two runs of the optimized
-configuration in [`results/trusted-shipped.json`](results/trusted-shipped.json):
+configuration in [`results/trusted-fused.json`](results/trusted-fused.json), with
+the pre-fusion run in [`results/trusted-shipped.json`](results/trusted-shipped.json)
+for comparison:
 
 | Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
 | --- | ---: | ---: | ---: | ---: |
-| 512 tokens | 1,330 tok/s | 0.38 s | 30.86 tok/s | 32.40 ms/token |
-| 2,048 tokens | 2,580 tok/s | 0.79 s | 30.81 tok/s | 32.46 ms/token |
-| 8,192 tokens | 3,392 tok/s | 2.42 s | 30.71 tok/s | 32.56 ms/token |
+| 512 tokens | 1,344 tok/s | 0.38 s | 35.74 tok/s | 27.98 ms/token |
+| 2,048 tokens | 2,561 tok/s | 0.80 s | 35.54 tok/s | 28.14 ms/token |
+| 8,192 tokens | 3,370 tok/s | 2.43 s | 35.56 tok/s | 28.12 ms/token |
+
+The decode kernels are 13.9-14.4% faster than the pre-fusion baseline (32.40-32.56
+ms/token to 27.98-28.14 ms/token, or +16.1% to +16.8% throughput). Prompt
+processing is unchanged within noise (1,330 to 1,344, 2,580 to 2,561, 3,392 to
+3,370 tok/s): the fused kernels are decode-only, and prefill keeps the reference
+expressions. See [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
 
 - Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Throughput is the slowest GPU worker.
 - The run compares only the last prompt position; see [Limits](#limits).
-- HTTP queueing, backend sampling and token delivery are excluded, so end-to-end serving throughput is not measured.
-- Results use optimized GPU kernels and an expert-placement file calibrated on random token IDs. The file is not committed, so a deployment needs its own calibration on realistic traffic. Fused `hc_mixes` is disabled.
+- HTTP queueing, backend sampling and token delivery are excluded, so these are model-loop numbers. Served latency is measured in [Served latency](#served-latency).
+- Results use optimized GPU kernels and an expert-placement file calibrated on random token IDs. The file is not committed, so a deployment needs its own calibration on realistic traffic. The fused `hc_mixes` coefficient projection is enabled at decode and disabled at prefill.
 - Earlier runs and before/after comparisons are in the [detailed results](docs/OPTIMIZE-RESULTS.md).
+
+### Served latency
+
+Through the HTTP/SSE server (`serve/bench_serving.py`), one request, greedy, ~64-token prompt:
+
+| Measurement | Served | Model loop |
+| --- | ---: | ---: |
+| Time to first token | 178 ms | — |
+| Inter-token latency | 28.54 ms | 28.12 ms |
+| Decode throughput | 35.0 tok/s | 35.6 tok/s |
+
+Prompt processing as a client sees it is a **1.25 s TTFT for a ~4K-token prompt**. The serving path adds about 1.5% on top of the model loop, so sampling, delivery and SSE framing are not where the remaining time is.
+
+Concurrency is measured and does not scale: per-request latency is unchanged at concurrency 2 (28.57 ms), but aggregate throughput falls to 15.0 tok/s at concurrency 4 and TTFT rises from 0.18 s to 3-18 s. The cause is not established. See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
 
 ### Limits
 
 - **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position, where the two paths agree. Over the whole prompt they differ by 15.7–16.1 on the logits with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
 - **Decode agreement holds only for a shared starting state.** It does not show that prompt processing builds equivalent state.
-- **One request at a time.** The optimized decode graph handles one token from one request; batches of 2, 4 and 8 are unmeasured.
+- **One request at a time is no longer untested, and concurrency is worse.** Batches of 2 leave per-request inter-token latency unchanged (28.57 ms against 28.54 ms), so two rows cost the same per step as one. But aggregate throughput falls at 4 (15.0 tok/s against 35.0 at concurrency 1) with per-request latency up 5.8x, and TTFT rises from 0.18 s to 3-18 s. The cause is not established. See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
 - **No matched vLLM comparison.** Local vLLM numbers use different workloads and methods, so the speedup is uncontrolled.
+- **The custom-allreduce path does not run on this stack.** It is 1.6x faster than graphed NCCL in isolation, but routing the engine through it dies on a CUDA `invalid argument` from vLLM's kernel, so it is not integrated and the ~3.5 ms/step the trace attributes to the collective group is unclaimed.
 
 ## Next steps
 

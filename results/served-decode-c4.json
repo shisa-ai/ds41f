@@ -1,0 +1,27 @@
+{
+  "mode": "decode",
+  "prompt_tokens": 64,
+  "max_tokens": 128,
+  "concurrency": 4,
+  "repeats": 2,
+  "samples": [
+    {
+      "ttft_s": 3.1409609320107847,
+      "itl_s": 0.16418067562408362,
+      "tokens": 452,
+      "total_s": 24.022544263862073,
+      "wave_s": 24.022544263862073,
+      "aggregate_tok_s": 18.815658950828073,
+      "completed": 4
+    },
+    {
+      "ttft_s": 18.42129520792514,
+      "itl_s": 0.1642051090720501,
+      "tokens": 437,
+      "total_s": 38.8819709259551,
+      "wave_s": 38.8819709259551,
+      "aggregate_tok_s": 11.239142193491197,
+      "completed": 4
+    }
+  ]
+}

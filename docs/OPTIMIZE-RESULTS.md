@@ -38,8 +38,66 @@ Remaining work and follow-up status:
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
-| Custom / symmetric-memory collectives | Measured. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is 1.2-1.3x faster than eager NCCL there. An end-to-end gain is not established. See [Collectives](#collectives). |
+| Custom / symmetric-memory collectives | Measured at the collective, and end-to-end integration **failed**. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes, but routing the engine's call sites through it dies on `custom_all_reduce.cuh:164 'invalid argument'` on this build, so the integration was reverted. See [Collectives](#collectives). |
+| Served latency (HTTP/SSE) | **Measured.** Decode 28.54 ms inter-token (35.0 tok/s) against the model loop's 28.12 ms, so the serving path adds ~0.4 ms/token. Prefill TTFT 1.25 s at ~4K. Concurrency is measured and **degrades**: see [Served latency](#served-latency). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
+
+## Served latency
+
+Every number elsewhere in this document is the model loop: `benchmark_ds41f.py`
+has no HTTP, no scheduler and no token delivery, and the README says so.
+`serve/bench_serving.py` talks to the running server over its OpenAI-compatible
+SSE endpoint, so what it reports includes queueing, sampling, delivery and SSE
+framing. One request, four GPUs, greedy, ~64-token prompt:
+
+| Measurement | Served | Model loop | Overhead |
+| --- | ---: | ---: | ---: |
+| Time to first token | 178.5 ms | — | — |
+| Inter-token latency | 28.54 ms | 28.12 ms | **+0.42 ms/token (+1.5%)** |
+| Decode throughput | 35.04 tok/s | 35.56 tok/s | −1.5% |
+
+(`results/served-decode.json`, `results/served-prefill.json`. The model-loop
+column is the 8K row of `results/trusted-fused.json`, chosen because the served
+run's context grows through that range.)
+
+That is the useful result: the serving path is **not** where the remaining time is.
+Sampling, delivery, SSE framing and the scheduler cost about 1.5% on top of a step
+that is already ~28 ms, which also means the 3.12 ms/step drain measured in the
+model loop is not being hidden by anything in the served path.
+
+Prompt processing as a client sees it: **TTFT 1.25 s** for a ~4K-token prompt
+(1.23 s, 1.25 s after a 1.90 s cold first call). The model loop processes 2,561
+tok/s at 2K and 3,370 tok/s at 8K, so ~4K lands near 1.2-1.3 s, which is what the
+served path reports.
+
+### Concurrency degrades, and the reason is not established
+
+| Concurrency | Aggregate | Inter-token latency | Worst TTFT |
+| ---: | ---: | ---: | ---: |
+| 1 | 35.04 tok/s | 28.54 ms | 0.18 s |
+| 2 | 33.43 tok/s | 28.57 ms | 3.97 s |
+| 4 | 15.03 tok/s | 164.19 ms | 3.1-18.4 s |
+
+Two things are visible and one is not.
+
+Visible: at concurrency 2 the per-request inter-token latency is **unchanged**
+(28.57 ms against 28.54 ms), so two rows in a batch cost the same per step as one.
+That is the expected behaviour for a memory-bound decode GEMV and it means
+batching itself is not the problem.
+
+Visible: TTFT jumps from 0.18 s to ~4 s at concurrency 2, which is about one full
+128-token generation (128 x 28.5 ms = 3.65 s). The reading is that a request
+arriving while a cohort is running waits for that cohort to drain rather than being
+admitted into it. That is a scheduling property, measured here for the first time,
+and it is what the README's "rows stay in a batch until it drains" predicts.
+
+Not established: why concurrency 4 is far worse than concurrency 2. Per-request
+latency rises 5.8x while the batch grows 2x, and the TTFT spread (3.1 s to 18.4 s)
+varies by run, so something is serialising or contending rather than simply doing
+more work. The sample is two repeats per point and the server's `--max-active` is
+4, so this is a first measurement of a real regression, not a characterisation of
+it. It needs its own pass before anyone sizes a deployment from it -- which is the
+honest state of the README's previous "batches of 2, 4 and 8 are unmeasured" claim.
 
 ## Full-prompt diagnostic run
 
@@ -742,6 +800,31 @@ reductions stay on NCCL; that is a coverage limit, not a failure. This is a
 microbenchmark: it shows the decode collective can be made ~1.6x cheaper under
 capture, not that the served step gets faster. Switching the engine's backend
 needs an end-to-end measurement first.
+
+**End-to-end integration was attempted and failed at the kernel level.** The
+decode-sized call sites were routed through `CustomAllreduce` behind
+`DSV41F_CUSTOM_AR` (five `dist.all_reduce` sites -- embedding, `RowParallelLinear`,
+Engram, indexer and the MoE output -- with the two graph-capture sites wrapped in
+`CustomAllreduce.capture()`, and a size check per call so prefill keeps NCCL). It
+builds and the collectives are captured, but the first replay dies:
+
+```
+Failed: Cuda error /workspace/csrc/custom_all_reduce.cuh:164 'invalid argument'
+```
+
+on all four ranks, aborting the process. That is vLLM's kernel rejecting this
+build/CUDA combination, not a harness artifact like the two above, and the
+microbenchmark's own `custom_graph` path does not hit it. The integration has been
+**reverted** rather than left behind a flag, because a flag that aborts the process
+is worse than no flag. What the microbenchmark establishes is unchanged: the
+collective can be 1.6x cheaper. What is now also established is that the code path
+that would collect it does not run on this stack, so the ~3.5 ms/step the trace
+attributes to the NCCL all-reduce group stays unclaimed until that is resolved.
+
+Two environment notes from the attempt, since they cost most of the time: the
+`ds41f` env had no `vllm` at all, and its import chain needs `pyzmq`, `urllib3`
+and `requests` (installed). The `vllm-ds41f` env has vLLM but cannot compile this
+model's TileLang kernels, so it cannot run the end-to-end comparison.
 
 Per-rank minima differ by under 2.1 us on every shape (`*_rank_spread_ms`), so
 this microbenchmark does not see the rank skew that dominated the real 8K prefill

@@ -1,0 +1,19 @@
+trace: /data/ds41f/decode_trace_rank0.json
+4318 kernel launches/step, 22.19 ms of kernel time/step
+median kernel 1.86 us, p90 10.78 us
+
+kernel group                       launches/step   ms/step   share
+elementwise, copy and reduce                2374     4.622   20.8%
+NCCL all-reduce                               92     3.535   15.9%
+dense FP8 GEMV                               290     3.183   14.3%
+sparse attention                              40     2.749   12.4%
+MoE gate+up (_w13)                            40     2.314   10.4%
+MoE down (_w2)                                40     1.759    7.9%
+activation quantization                      410     1.047    4.7%
+radix/bitonic sorts                           98     0.787    3.5%
+other GEMMs (nvjet/cutlass)                   60     0.619    2.8%
+remainder                                    140     0.608    2.7%
+fused hyper-connections                      321     0.412    1.9%
+fused RMSNorm                                332     0.378    1.7%
+MoE combine                                   40     0.102    0.5%
+fused SwiGLU+route                            40     0.076    0.3%
