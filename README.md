@@ -145,7 +145,7 @@ Through the HTTP/SSE server (`serve/bench_serving.py`), one request, greedy, 61-
 | Model step, batch 1 | 28.48 ms | 26.96 ms |
 | Client inter-token latency | 28.78 ms | 26.96 ms |
 
-The serving path adds **1.5 ms per step** over the model loop at the same context: the rank-0-to-rank-3 broadcast plus the backend's per-row sampling and token write-back. A further 0.3 ms to the client is HTTP, SSE framing and detokenization.
+The serving path adds **1.5 ms per step** over the model loop at the same context: the rank-0-to-rank-3 broadcast plus the backend's per-row sampling and token write-back. A further 0.3 ms to the client is HTTP, SSE framing and detokenization. That broadcast is also a per-step rendezvous — rank 0 cannot enqueue the next step's forward until the previous step has finished on all four ranks — so the host read of each step's sampled token is not on the critical path and overlapping it, which was implemented and measured, recovers nothing (median 28.80 ms inside `enqueue` against 0.019 ms inside the read).
 
 Prompt processing as a client sees it is a **1.25 s TTFT for a 3,646-token prompt** (2,922 tok/s). The model loop measures 2,573 tok/s at 2,048 tokens and 3,366 tok/s at 8,192, so ~3,650 tokens lands near 2,900 tok/s. The served path runs at the model-loop rate.
 
