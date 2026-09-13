@@ -1,0 +1,132 @@
+{
+  "nccl_version": [
+    2,
+    30,
+    7
+  ],
+  "algo_env": {
+    "NCCL_PROTO": "Simple"
+  },
+  "rows": [
+    {
+      "name": "decode_moe_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.038183992728590965,
+      "min_ms": 0.03670481964945793,
+      "algbw_GBs": 0.5579648720683049,
+      "busbw_GBs": 0.8369473081024574,
+      "graph_median_ms": 0.028789625503122807,
+      "graph_min_ms": 0.02750498242676258
+    },
+    {
+      "name": "decode_moe_bf16",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 0.01024,
+      "median_ms": 0.0388510525226593,
+      "min_ms": 0.03718794323503971,
+      "algbw_GBs": 0.2753580625655988,
+      "busbw_GBs": 0.4130370938483982,
+      "graph_median_ms": 0.029228627681732178,
+      "graph_min_ms": 0.02805492840707302
+    },
+    {
+      "name": "decode_attn_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.03870704676955938,
+      "min_ms": 0.03720610402524471,
+      "algbw_GBs": 0.5504473133253649,
+      "busbw_GBs": 0.8256709699880473,
+      "graph_median_ms": 0.029469956643879414,
+      "graph_min_ms": 0.028531067073345184
+    },
+    {
+      "name": "prefill_attn_f32",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 167.77216,
+      "median_ms": 0.8168955100700259,
+      "min_ms": 0.7892090361565351,
+      "algbw_GBs": 212.5826648121694,
+      "busbw_GBs": 318.8739972182541,
+      "graph_median_ms": 0.7741970475763083,
+      "graph_min_ms": 0.7649199105799198
+    },
+    {
+      "name": "prefill_attn_bf16",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 83.88608,
+      "median_ms": 0.4268644843250513,
+      "min_ms": 0.41043292731046677,
+      "algbw_GBs": 204.38438151075886,
+      "busbw_GBs": 306.57657226613827,
+      "graph_median_ms": 0.40807854384183884,
+      "graph_min_ms": 0.39963889867067337
+    },
+    {
+      "name": "prefill_mid_f32",
+      "shape": [
+        2048,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 41.94304,
+      "median_ms": 0.23698399309068918,
+      "min_ms": 0.2276911400258541,
+      "algbw_GBs": 184.21024197620255,
+      "busbw_GBs": 276.31536296430386,
+      "graph_median_ms": 0.22311985958367586,
+      "graph_min_ms": 0.214375089854002
+    },
+    {
+      "name": "engram_bf16",
+      "shape": [
+        8192,
+        256
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 4.194304,
+      "median_ms": 0.07727148476988077,
+      "min_ms": 0.07541500963270664,
+      "algbw_GBs": 55.616302648869215,
+      "busbw_GBs": 83.42445397330383,
+      "graph_median_ms": 0.0630354043096304,
+      "graph_min_ms": 0.06158999167382717
+    },
+    {
+      "name": "indexer_f32",
+      "shape": [
+        8192,
+        512
+      ],
+      "dtype": "torch.float32",
+      "MB": 16.777216,
+      "median_ms": 0.12131244875490665,
+      "min_ms": 0.11739088222384453,
+      "algbw_GBs": 142.91753909821287,
+      "busbw_GBs": 214.37630864731932,
+      "graph_median_ms": 0.1059224596247077,
+      "graph_min_ms": 0.10242406278848648
+    }
+  ]
+}

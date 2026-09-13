@@ -1,0 +1,92 @@
+{
+  "variants": [
+    {
+      "name": "base",
+      "variant": {
+        "name": "base"
+      },
+      "decode_ms": 38.326206646161154,
+      "decode_tok_s": 26.091807343009314,
+      "prefill_s": 0.4606519751250744,
+      "prefill_tok_s": 1111.4681530693183
+    },
+    {
+      "name": "w13bn32",
+      "variant": {
+        "name": "w13bn32",
+        "env": {
+          "DSV41F_W13_BN": "32"
+        }
+      },
+      "decode_ms": 37.71597325976472,
+      "decode_tok_s": 26.51396513388657,
+      "prefill_s": 0.46272281487472355,
+      "prefill_tok_s": 1106.4939604039573
+    },
+    {
+      "name": "w13bn8",
+      "variant": {
+        "name": "w13bn8",
+        "env": {
+          "DSV41F_W13_BN": "8"
+        }
+      },
+      "decode_ms": 38.31153018109035,
+      "decode_tok_s": 26.10180264983454,
+      "prefill_s": 0.4625829861033708,
+      "prefill_tok_s": 1106.8284294519779
+    },
+    {
+      "name": "w2bn64",
+      "variant": {
+        "name": "w2bn64",
+        "env": {
+          "DSV41F_W2_BN": "64"
+        }
+      },
+      "decode_ms": 46.11507810477633,
+      "decode_tok_s": 21.68488141184403,
+      "prefill_s": 0.46233441797085106,
+      "prefill_tok_s": 1107.4235014713531
+    },
+    {
+      "name": "w2bn16",
+      "variant": {
+        "name": "w2bn16",
+        "env": {
+          "DSV41F_W2_BN": "16"
+        }
+      },
+      "decode_ms": 38.3327421877766,
+      "decode_tok_s": 26.0873588198153,
+      "prefill_s": 0.46245763497427106,
+      "prefill_tok_s": 1107.1284400537256
+    },
+    {
+      "name": "warps8",
+      "variant": {
+        "name": "warps8",
+        "env": {
+          "DSV41F_MOE_WARPS": "8"
+        }
+      },
+      "decode_ms": 36.66742111090571,
+      "decode_tok_s": 27.272166127401245,
+      "prefill_s": 0.46359863318502903,
+      "prefill_tok_s": 1104.403601197964
+    },
+    {
+      "name": "warps2",
+      "variant": {
+        "name": "warps2",
+        "env": {
+          "DSV41F_MOE_WARPS": "2"
+        }
+      },
+      "decode_ms": 38.254043174674734,
+      "decode_tok_s": 26.141027640760036,
+      "prefill_s": 0.46286225505173206,
+      "prefill_tok_s": 1106.1606221115956
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "variants": [
+    {
+      "name": "base",
+      "variant": {
+        "name": "base"
+      },
+      "decode_ms": 32.139756018295884,
+      "decode_tok_s": 31.114112983021396,
+      "prefill_s": 3.617158866021782,
+      "prefill_tok_s": 2264.7609086104953
+    },
+    {
+      "name": "bn128",
+      "variant": {
+        "name": "bn128",
+        "env": {
+          "DSV41F_PF_BN": "128"
+        }
+      },
+      "decode_ms": 32.24361746106297,
+      "decode_tok_s": 31.01388984060454,
+      "prefill_s": 4.335516730090603,
+      "prefill_tok_s": 1889.5094887175776
+    },
+    {
+      "name": "bn32",
+      "variant": {
+        "name": "bn32",
+        "env": {
+          "DSV41F_PF_BN": "32"
+        }
+      },
+      "decode_ms": 32.41096599958837,
+      "decode_tok_s": 30.85375486842016,
+      "prefill_s": 4.160970072960481,
+      "prefill_tok_s": 1968.7716701532268
+    },
+    {
+      "name": "bk64",
+      "variant": {
+        "name": "bk64",
+        "env": {
+          "DSV41F_PF_BK": "64"
+        }
+      },
+      "decode_ms": 32.092861947603524,
+      "decode_tok_s": 31.159576906311816,
+      "prefill_s": 4.288821080932394,
+      "prefill_tok_s": 1910.0820121456434
+    },
+    {
+      "name": "warps4",
+      "variant": {
+        "name": "warps4",
+        "env": {
+          "DSV41F_PF_WARPS": "4"
+        }
+      },
+      "decode_ms": 32.212128513492644,
+      "decode_tok_s": 31.044207450654234,
+      "prefill_s": 5.11559975403361,
+      "prefill_tok_s": 1601.3762596537526
+    },
+    {
+      "name": "warps16",
+      "variant": {
+        "name": "warps16",
+        "env": {
+          "DSV41F_PF_WARPS": "16"
+        }
+      },
+      "decode_ms": 32.08841057494283,
+      "decode_tok_s": 31.16389942918766,
+      "prefill_s": 4.1747556200716645,
+      "prefill_tok_s": 1962.2705483918542
+    },
+    {
+      "name": "stages4",
+      "variant": {
+        "name": "stages4",
+        "env": {
+          "DSV41F_PF_STAGES": "4"
+        }
+      },
+      "decode_ms": 32.186965574510396,
+      "decode_tok_s": 31.068477010828357,
+      "prefill_s": 4.029027719050646,
+      "prefill_tok_s": 2033.244884681575
+    },
+    {
+      "name": "stages2",
+      "variant": {
+        "name": "stages2",
+        "env": {
+          "DSV41F_PF_STAGES": "2"
+        }
+      },
+      "decode_ms": 32.25969197228551,
+      "decode_tok_s": 30.99843609353449,
+      "prefill_s": 4.248043966013938,
+      "prefill_tok_s": 1928.4169527291378
+    }
+  ]
+}

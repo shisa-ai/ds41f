@@ -1,0 +1,161 @@
+{
+  "status": "failed",
+  "world_size": 4,
+  "decode_steps": 32,
+  "rows": [
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 5.167079736012965,
+      "prefill_tok_s": 396.3554085929943,
+      "decode_ms": 204.3842826533364,
+      "decode_tok_s": 4.892744133834088
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 1.0142638362012804,
+      "prefill_tok_s": 2019.1984835724488,
+      "decode_ms": 44.79548576637171,
+      "decode_tok_s": 22.323677997721525
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 1.0131858808454126,
+      "prefill_tok_s": 2021.346762443164,
+      "decode_ms": 44.8078419722151,
+      "decode_tok_s": 22.317522022597966
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 5.170687309931964,
+      "prefill_tok_s": 396.07887254488566,
+      "decode_ms": 204.64112251647748,
+      "decode_tok_s": 4.886603375230612
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 9.09276601811871,
+      "prefill_tok_s": 900.9359730225327,
+      "decode_ms": 204.86853433976648,
+      "decode_tok_s": 4.881179060624015
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 3.398074730997905,
+      "prefill_tok_s": 2410.776880587989,
+      "decode_ms": 44.94354942289647,
+      "decode_tok_s": 22.250134064635102
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 3.399813119089231,
+      "prefill_tok_s": 2409.544205239886,
+      "decode_ms": 44.84364856762113,
+      "decode_tok_s": 22.299702007789776
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 9.0908247041516,
+      "prefill_tok_s": 901.1283647630863,
+      "decode_ms": 205.3232248290442,
+      "decode_tok_s": 4.87036963710568
+    }
+  ],
+  "decode_state": "same GPU-buffer snapshot per comparison; cold prefill timed independently",
+  "source_sha256": {
+    "model.py": "4615a3b39806d05e072bc7997b39563b6a62e26aa3af024240e739dcd67d2c89",
+    "grouped_moe.py": "7bf2b55599994f59dc4bf34b15c390e658d36249d978795ff38fb23f9681a97a",
+    "kernel_gemv.py": "b220472e99aedf3c5fd9104b467cf06d57ae6d0fba41f86a8deaa2e20d1ce46f",
+    "kernel.py": "5efd129db63ccdae20ba3dafb9dee88a406c8017552f9f0f14f9c21668962fe2",
+    "benchmark_ds41f.py": "a4895561da4d867a9cd1c4eca73636cd1d888b7ccf1c9647ee93e547c292fa75"
+  },
+  "parity": [
+    {
+      "length": 2048,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 0.6489835977554321,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 0.515784502029419,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 0.0,
+      "prefill_max_logit_diff": 0.7243658900260925,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 0.0,
+      "prefill_max_logit_diff": 1.8003402948379517,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ],
+  "failed_check": {
+    "length": 8192,
+    "repeat": 1,
+    "top1_agreement": 1.0,
+    "prefill_top1_agreement": 0.0,
+    "prefill_max_logit_diff": 1.8003402948379517,
+    "max_logit_diff": 0.0,
+    "mean_kl": 0.0,
+    "max_kl": 0.0
+  },
+  "parity_failures": [
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 0.0,
+      "prefill_max_logit_diff": 0.7243658900260925,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 0.0,
+      "prefill_max_logit_diff": 1.8003402948379517,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "status": "failed",
+  "world_size": 4,
+  "decode_steps": 32,
+  "rows": [
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 5.156077560968697,
+      "prefill_tok_s": 397.201162275618,
+      "decode_ms": 207.51898534217617,
+      "decode_tok_s": 4.818836206003557
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 0.8668310870416462,
+      "prefill_tok_s": 2362.628695043104,
+      "decode_ms": 32.69259855733253,
+      "decode_tok_s": 30.587963151546816
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 0.8668478638865054,
+      "prefill_tok_s": 2362.5829690781134,
+      "decode_ms": 32.64386543742148,
+      "decode_tok_s": 30.633627072045343
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 5.162576547125354,
+      "prefill_tok_s": 396.7011396935848,
+      "decode_ms": 206.07915988512104,
+      "decode_tok_s": 4.852504253984006
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 9.09861348499544,
+      "prefill_tok_s": 900.3569624657054,
+      "decode_ms": 207.1887413476361,
+      "decode_tok_s": 4.826517085318494
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 2.7610780680552125,
+      "prefill_tok_s": 2966.9570356516942,
+      "decode_ms": 32.73883521615062,
+      "decode_tok_s": 30.54476414318745
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 2.7606030630413443,
+      "prefill_tok_s": 2967.4675470999837,
+      "decode_ms": 32.741120558057446,
+      "decode_tok_s": 30.5426321077427
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 9.102757063927129,
+      "prefill_tok_s": 899.9471195890393,
+      "decode_ms": 206.6091433443944,
+      "decode_tok_s": 4.840056852339354
+    }
+  ],
+  "decode_state": "same GPU-buffer snapshot per comparison; cold prefill timed independently",
+  "source_sha256": {
+    "model.py": "6523676daa5600f3eb6018ab9a848f570705b62e28a567fcec2ae31ac8f3470c",
+    "grouped_moe.py": "4f550896c786861063748a304047dff376f7ca350878b148b18038545c3bcae6",
+    "kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+    "kernel.py": "5efd129db63ccdae20ba3dafb9dee88a406c8017552f9f0f14f9c21668962fe2",
+    "benchmark_ds41f.py": "a4895561da4d867a9cd1c4eca73636cd1d888b7ccf1c9647ee93e547c292fa75"
+  },
+  "parity": [
+    {
+      "length": 2048,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 0.7125939130783081,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 0.7424068450927734,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 1.2292336225509644,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 1.3236908912658691,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ],
+  "failed_check": {
+    "length": 8192,
+    "repeat": 1,
+    "top1_agreement": 1.0,
+    "prefill_top1_agreement": 1.0,
+    "prefill_max_logit_diff": 1.3236908912658691,
+    "max_logit_diff": 0.0,
+    "mean_kl": 0.0,
+    "max_kl": 0.0
+  },
+  "parity_failures": [
+    {
+      "length": 8192,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff": 1.3236908912658691,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "variants": [
+    {
+      "name": "base",
+      "variant": {
+        "name": "base"
+      },
+      "decode_ms": 113.25121433765162,
+      "decode_tok_s": 8.829927395026077,
+      "prefill_s": 4.079586365958676,
+      "prefill_tok_s": 2008.0467148229952
+    },
+    {
+      "name": "bincount_sync",
+      "variant": {
+        "name": "bincount_sync",
+        "bincount_sync": true
+      },
+      "decode_ms": 113.99903366691433,
+      "decode_tok_s": 8.772004181384808,
+      "prefill_s": 4.668035067152232,
+      "prefill_tok_s": 1754.913980326542
+    },
+    {
+      "name": "hc_fused",
+      "variant": {
+        "name": "hc_fused",
+        "hc_fused": true
+      },
+      "decode_ms": 112.1385210135486,
+      "decode_tok_s": 8.917542258999294,
+      "prefill_s": 3.9192958760540932,
+      "prefill_tok_s": 2090.171362170192
+    },
+    {
+      "name": "gemv0",
+      "variant": {
+        "name": "gemv0",
+        "fp8_gemv_min": 0
+      },
+      "decode_ms": 110.54832015361171,
+      "decode_tok_s": 9.045818141880911,
+      "prefill_s": 5.00934978807345,
+      "prefill_tok_s": 1635.3419798122277
+    },
+    {
+      "name": "hc_fused_gemv0",
+      "variant": {
+        "name": "hc_fused_gemv0",
+        "hc_fused": true,
+        "fp8_gemv_min": 0
+      },
+      "decode_ms": 109.84235971409362,
+      "decode_tok_s": 9.103955911024482,
+      "prefill_s": 3.915430252905935,
+      "prefill_tok_s": 2092.234945040868
+    },
+    {
+      "name": "engram_gpu",
+      "variant": {
+        "name": "engram_gpu",
+        "engram_device": "cuda"
+      },
+      "decode_ms": 115.47380380216055,
+      "decode_tok_s": 8.659972799660123,
+      "prefill_s": 4.709439655067399,
+      "prefill_tok_s": 1739.4850767830383
+    },
+    {
+      "name": "hc_fused_engram_gpu",
+      "variant": {
+        "name": "hc_fused_engram_gpu",
+        "hc_fused": true,
+        "engram_device": "cuda"
+      },
+      "decode_ms": 114.11680080345832,
+      "decode_tok_s": 8.762951580830638,
+      "prefill_s": 3.7649778770282865,
+      "prefill_tok_s": 2175.842798435241
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "variants": [
+    {
+      "name": "base",
+      "variant": {
+        "name": "base"
+      },
+      "decode_ms": 35.10204162739683,
+      "decode_tok_s": 28.48837143476888,
+      "prefill_s": 0.46322507108561695,
+      "prefill_tok_s": 1105.2942337513682
+    },
+    {
+      "name": "warps8_w13bn32",
+      "variant": {
+        "name": "warps8_w13bn32",
+        "env": {
+          "DSV41F_MOE_WARPS": "8",
+          "DSV41F_W13_BN": "32"
+        }
+      },
+      "decode_ms": 34.68299254018348,
+      "decode_tok_s": 28.832575471721675,
+      "prefill_s": 0.4628260668832809,
+      "prefill_tok_s": 1106.2471123285288
+    },
+    {
+      "name": "warps8_w13bn32_w2bn16",
+      "variant": {
+        "name": "warps8_w13bn32_w2bn16",
+        "env": {
+          "DSV41F_MOE_WARPS": "8",
+          "DSV41F_W13_BN": "32",
+          "DSV41F_W2_BN": "16"
+        }
+      },
+      "decode_ms": 34.67120973800775,
+      "decode_tok_s": 28.842374049145633,
+      "prefill_s": 0.46045892708934844,
+      "prefill_tok_s": 1111.9341376145162
+    },
+    {
+      "name": "warps16_w13bn32",
+      "variant": {
+        "name": "warps16_w13bn32",
+        "env": {
+          "DSV41F_MOE_WARPS": "16",
+          "DSV41F_W13_BN": "32"
+        }
+      },
+      "decode_ms": 35.46193211514037,
+      "decode_tok_s": 28.19925312453725,
+      "prefill_s": 0.46163049596361816,
+      "prefill_tok_s": 1109.1121675816485
+    },
+    {
+      "name": "warps8_w13bn64",
+      "variant": {
+        "name": "warps8_w13bn64",
+        "env": {
+          "DSV41F_MOE_WARPS": "8",
+          "DSV41F_W13_BN": "64"
+        }
+      },
+      "decode_ms": 34.957379088154994,
+      "decode_tok_s": 28.606263572512546,
+      "prefill_s": 0.46139165200293064,
+      "prefill_tok_s": 1109.686310485626
+    }
+  ]
+}
