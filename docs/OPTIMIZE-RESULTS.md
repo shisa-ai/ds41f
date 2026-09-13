@@ -40,7 +40,7 @@ Remaining work and follow-up status:
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
-| Custom / symmetric-memory collectives | Measured at the collective, and end-to-end integration **failed**. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes, but routing the engine's call sites through it dies on `custom_all_reduce.cuh:164 'invalid argument'` on this build, so the integration was reverted. See [Collectives](#collectives). |
+| Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
 
@@ -950,30 +950,79 @@ microbenchmark: it shows the decode collective can be made ~1.6x cheaper under
 capture, not that the served step gets faster. Switching the engine's backend
 needs an end-to-end measurement first.
 
-**End-to-end integration was attempted and failed at the kernel level.** The
-decode-sized call sites were routed through `CustomAllreduce` behind
-`DSV41F_CUSTOM_AR` (five `dist.all_reduce` sites -- embedding, `RowParallelLinear`,
-Engram, indexer and the MoE output -- with the two graph-capture sites wrapped in
-`CustomAllreduce.capture()`, and a size check per call so prefill keeps NCCL). It
-builds and the collectives are captured, but the first replay dies:
+**The end-to-end integration works, and the earlier "failed at the kernel level"
+verdict was wrong about its cause.** All five decode-sized `dist.all_reduce` sites
+(embedding, `RowParallelLinear`, Engram, indexer, MoE output) now go through one
+helper, `model.all_reduce_`, behind `DSV41F_CUSTOM_AR`; it falls back to NCCL for
+any shape `custom_all_reduce` declines, so prefill stays on NCCL without a separate
+gate. Two independent bugs had to come out first, and
+`inference/check_custom_ar_ipc.py` isolates both in about twenty seconds, without
+loading the model:
 
-```
-Failed: Cuda error /workspace/csrc/custom_all_reduce.cuh:164 'invalid argument'
-```
+1. `Failed: Cuda error .../csrc/custom_all_reduce.cuh:164 'invalid argument'` is
+   `cudaIpcGetMemHandle`, not the reduction. Registering a captured reduction calls
+   it on every buffer the graph touched (`get_graph_buffer_ipc_meta`), and it
+   rejects the `cuMemCreate`/`cuMemMap` memory that `expandable_segments:True`
+   hands out. `--stage probe` exports a plain allocation, a side-stream allocation
+   and a graph-pool allocation: `cudaSuccess` for all three without expandable
+   segments, `cudaErrorInvalidValue` for all three with them. The microbenchmark
+   never set `expandable_segments`; every harness that loads the model did. That
+   difference alone accounts for the failure, and it is an allocator policy, not a
+   kernel or a CUDA version.
+2. An illegal memory access on the first replay, in the per-layer MoE decode
+   graphs. The C++ reserves a RankData slot for every collective it sees while the
+   stream is capturing, and only `CustomAllreduce.capture()`'s exit fills that slot
+   with peer pointers; those graphs were captured without `capture()`. `--stage
+   graph_eager` captures one reduction both ways: without `capture()` the capture
+   reports success and the first replay faults on all four ranks; with it, the
+   replay is exact. A graph holding only a device-to-device copy also replays
+   exactly, so the fault is the unregistered slot, not graph memcpy and not the
+   allocator. Every capture that contains a collective now sits inside `capture()`.
 
-on all four ranks, aborting the process. That is vLLM's kernel rejecting this
-build/CUDA combination, not a harness artifact like the two above, and the
-microbenchmark's own `custom_graph` path does not hit it. The integration has been
-**reverted** rather than left behind a flag, because a flag that aborts the process
-is worse than no flag. What the microbenchmark establishes is unchanged: the
-collective can be 1.6x cheaper. What is now also established is that the code path
-that would collect it does not run on this stack, so the ~3.5 ms/step the trace
-attributes to the NCCL all-reduce group stays unclaimed until that is resolved.
+The engine does not need expandable segments at the served configuration
+(max-active 4, 8192 context, Engram offload on): peak is 93.8 GiB of 143.8 GiB per
+GPU, and TTFT and ITL are unchanged. `inference/custom_ar.py` therefore requires
+`DSV41F_EXPANDABLE_SEGMENTS=0` alongside `DSV41F_CUSTOM_AR=1` and refuses the
+combination instead of letting it abort later.
 
-Two environment notes from the attempt, since they cost most of the time: the
-`ds41f` env had no `vllm` at all, and its import chain needs `pyzmq`, `urllib3`
-and `requests` (installed). The `vllm-ds41f` env has vLLM but cannot compile this
-model's TileLang kernels, so it cannot run the end-to-end comparison.
+With both fixed the served decode step is faster. Interleaved, same code and same
+allocator, only the collective differs:
+
+| Backend | ITL median ms/step | runs |
+| --- | ---: | --- |
+| NCCL | 29.09, 28.93 | 2 runs x 3 reps x 128 tokens, concurrency 1 |
+| Custom allreduce | 27.62, 27.60 | same |
+
+That is 1.4 ms/step, 4.8%, and the two backends' ranges do not overlap. The
+microbenchmark's 13.1 vs 21.6 us understated it, because a barrier-synchronised
+microbenchmark cannot see the rank skew a real step pays.
+
+**Correctness is checked at the reduction, not at the tokens.** `DSV41F_AR_CHECK=1`
+runs `dist.all_reduce` on a clone at every custom call site and accumulates the
+difference, split by whether the call was being captured. Over a graphed and an
+eager decode arm: captured call sites differ by at most **1.9e-06**, eager call
+sites by at most **0.03125**, which is one bf16 ulp at magnitude 4 (the eager set
+is all bf16). The fp32 reductions -- the row-parallel and MoE partials, which are
+what the collective exists for -- are in the 1e-06 group. No call had a non-finite
+input. The two artifacts that made an earlier version of this check useless are
+recorded in the harness: reading the per-call difference tensor after the step
+graphs were rebuilt reads freed pool memory and reports 1e38, and comparing during
+`capture()`'s warm-up compares against `torch.empty_like`, which vLLM returns there
+on purpose.
+
+**Comparing generated tokens across backends does not isolate the collective**, and
+should not be read as one. At B=1 the custom arm emits 2181 where NCCL emits 779,
+but this model already produces logit differences of 5.22/11.92/28.34 from a
+prefill fp32 reordering -- the `atomic_add` that `DSV41F_PF_FIXED_ORDER` exists to
+remove -- so a one-ulp change in a collective is expected to move tokens too. That
+is a statement about the model's near-tie sensitivity, not an equivalence proof, and
+it is why `DSV41F_CUSTOM_AR` stays opt-in rather than becoming the default.
+
+Two environment notes, since they cost most of the time: the `ds41f` env has no
+`vllm`, so the harnesses need `PYTHONPATH=/root/glm-testing/vllm-ds41f-src` (its
+import chain also needs `pyzmq`, `urllib3` and `requests`, installed). The
+`vllm-ds41f` env has vLLM but cannot compile this model's TileLang kernels, so it
+cannot run the end-to-end comparison.
 
 Per-rank minima differ by under 2.1 us on every shape (`*_rank_spread_ms`), so
 this microbenchmark does not see the rank skew that dominated the real 8K prefill
@@ -1263,13 +1312,14 @@ experts. A recorded example is `results/manifest-shipped.json`
   (2%). It selects experts, so changing its precision changes which experts run,
   not just the values. Not attempted; the same fused approach used for `hc_mixes`
   would apply, but the sensitivity is higher and the prize is smaller.
-- **Custom or symmetric-memory collectives (section 2).** Measured. Custom
-  allreduce + symmetric memory is capturable and 1.3-1.6x faster than graphed NCCL
-  at decode-sized messages; it is unsupported above its 8 MiB buffer, so the
+- **Custom or symmetric-memory collectives (section 2).** Integrated behind
+  `DSV41F_CUSTOM_AR=1 DSV41F_EXPANDABLE_SEGMENTS=0`, measured at 4.8% on the served
+  decode step (29.0 -> 27.6 ms), and numerically verified at the call sites to
+  1.9e-06 on the fp32 reductions. Left opt-in: it changes generated tokens, and the
+  served path is not deterministic enough to prove equivalence (see
+  [Collectives](#collectives)). It is unsupported above its 8 MiB buffer, so the
   prefill-sized reductions stay on NCCL. FlashInfer is 1.2-1.3x faster than eager
-  NCCL at decode sizes and no faster at prefill sizes. Neither is an end-to-end
-  gain: switching the engine's decode backend needs an end-to-end measurement
-  first. See [Collectives](#collectives).
+  NCCL at decode sizes and no faster at prefill sizes; it was not integrated.
 - **DSpark integration (section 5), Engram GPU lookup (section 6), continuous
   admission (section 8), EP or pipeline topology (section 9).** Out of scope for
   this pass.
