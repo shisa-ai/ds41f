@@ -1,0 +1,19 @@
+{
+  "change": "fuse the shared expert's cast/clamp/silu/multiply tail into moe_kernels.swiglu_route",
+  "flag": "_EXPERT_SWIGLU_FUSED",
+  "harness": "bench_ab.py --flag _EXPERT_SWIGLU_FUSED --repeats 4",
+  "env": "DSV41F_ENGRAM_OFFLOAD=1, TP4, B=1, 2048 context, worst rank",
+  "on_ms_per_step": [26.596, 26.657, 26.608, 26.582],
+  "off_ms_per_step": [27.053, 27.052, 27.001, 27.118],
+  "on_median": 26.602,
+  "off_median": 27.053,
+  "delta_ms_per_step": 0.450,
+  "delta_percent_latency": 1.67,
+  "launches_removed_per_step": 240,
+  "identical_tokens": true,
+  "exactness": {
+    "check_expert_swiglu_exact.py": "0 of 138240 bf16 elements differ at limit 10 and limit 0, over 8 random draws, inputs pinned to the clamp and one ulp either side, and saturating inputs at -90/-20/20/90",
+    "check_moe_swiglu_exact.py": "routed path unchanged by the new HAS_WEIGHT constexpr: 0 differing elements inside and outside the model's range",
+    "check_decode_parity.py": "prefill logits bit-equal 66191360/66191360, decode logits bit-equal at every step, first differing token step = None (64 steps)"
+  }
+}
