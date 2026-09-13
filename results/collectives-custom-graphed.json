@@ -1,0 +1,402 @@
+{
+  "nccl_version": [
+    2,
+    29,
+    7
+  ],
+  "algo_env": {},
+  "timing_input": "zeros (reduction latency is data-independent at these sizes)",
+  "rows": [
+    {
+      "name": "decode_moe_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.02926308661699295,
+      "min_ms": 0.028103124350309372,
+      "algbw_GBs": 0.7287445959642755,
+      "busbw_GBs": 1.0931168939464133,
+      "graph_median_ms": 0.022636493667960167,
+      "graph_min_ms": 0.021600862964987755,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.028103124350309372,
+          0.0281468965113163,
+          0.027836998924613,
+          0.02804701216518879
+        ],
+        "graph": [
+          0.021600862964987755,
+          0.02118898555636406,
+          0.02140691503882408,
+          0.02078898251056671
+        ],
+        "custom": [
+          0.021243933588266373,
+          0.021298881620168686,
+          0.02114800736308098,
+          0.021243002265691757
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0003098975867033005,
+      "graph_rank_spread_ms": 0.0008118804544210434,
+      "custom_rank_spread_ms": 0.00015087425708770752,
+      "custom_median_ms": 0.021785497665405273,
+      "custom_min_ms": 0.021243933588266373,
+      "custom_speedup": 1.3228776221476952,
+      "custom_graph_median_ms": 0.01355959102511406,
+      "custom_graph_min_ms": 0.013073207810521126,
+      "custom_graph_speedup": 2.1496731909740157,
+      "custom_graph_vs_nccl_graph_speedup": 1.6523001300112201,
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "decode_moe_bf16",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 0.01024,
+      "median_ms": 0.02844387199729681,
+      "min_ms": 0.026892172172665596,
+      "algbw_GBs": 0.38077995091852024,
+      "busbw_GBs": 0.5711699263777803,
+      "graph_median_ms": 0.021416926756501198,
+      "graph_min_ms": 0.02043507993221283,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.026892172172665596,
+          0.02701394259929657,
+          0.026831170544028282,
+          0.02686888910830021
+        ],
+        "graph": [
+          0.02043507993221283,
+          0.019856030121445656,
+          0.01986115239560604,
+          0.01988210715353489
+        ],
+        "custom": [
+          0.021219952031970024,
+          0.02136407420039177,
+          0.021382002159953117,
+          0.021266983821988106
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.00018277205526828766,
+      "graph_rank_spread_ms": 0.0005790498107671738,
+      "custom_rank_spread_ms": 0.00016205012798309326,
+      "custom_median_ms": 0.021898536942899227,
+      "custom_min_ms": 0.021219952031970024,
+      "custom_speedup": 1.2673059831685667,
+      "custom_graph_median_ms": 0.013444921933114529,
+      "custom_graph_min_ms": 0.012978911399841309,
+      "custom_graph_speedup": 2.0719898105625716,
+      "custom_graph_vs_nccl_graph_speedup": 1.5744833524684272,
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "decode_attn_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.02952211070805788,
+      "min_ms": 0.027972040697932243,
+      "algbw_GBs": 0.7321596669031705,
+      "busbw_GBs": 1.0982395003547558,
+      "graph_median_ms": 0.022533000446856022,
+      "graph_min_ms": 0.021377112716436386,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.027972040697932243,
+          0.02777203917503357,
+          0.027935951948165894,
+          0.02799299545586109
+        ],
+        "graph": [
+          0.021377112716436386,
+          0.02078898251056671,
+          0.021031126379966736,
+          0.02105487510561943
+        ],
+        "custom": [
+          0.021417858079075813,
+          0.02149585634469986,
+          0.021467916667461395,
+          0.02146395854651928
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.00022095628082752228,
+      "graph_rank_spread_ms": 0.0005881302058696747,
+      "custom_rank_spread_ms": 7.799826562404633e-05,
+      "custom_median_ms": 0.022048596292734146,
+      "custom_min_ms": 0.021417858079075813,
+      "custom_speedup": 1.3060148496015829,
+      "custom_graph_median_ms": 0.013514072634279728,
+      "custom_graph_min_ms": 0.013063894584774971,
+      "custom_graph_speedup": 2.1411716480422034,
+      "custom_graph_vs_nccl_graph_speedup": 1.6363506745798357,
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "prefill_attn_f32",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 167.77216,
+      "median_ms": 0.7838904857635498,
+      "min_ms": 0.7743199821561575,
+      "algbw_GBs": 216.6703221745933,
+      "busbw_GBs": 325.00548326188994,
+      "graph_median_ms": 0.7767305942252278,
+      "graph_min_ms": 0.7663110736757517,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.7743199821561575,
+          0.7741500157862902,
+          0.7685651071369648,
+          0.7702249567955732
+        ],
+        "graph": [
+          0.7663110736757517,
+          0.766583951190114,
+          0.764461001381278,
+          0.7647939492017031
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.005754875019192696,
+      "graph_rank_spread_ms": 0.0021229498088359833,
+      "custom_error": "unsupported_at_this_size",
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "prefill_attn_bf16",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 83.88608,
+      "median_ms": 0.4150485619902611,
+      "min_ms": 0.4056701436638832,
+      "algbw_GBs": 206.7839630552244,
+      "busbw_GBs": 310.1759445828366,
+      "graph_median_ms": 0.40607096161693335,
+      "graph_min_ms": 0.39825099520385265,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.4056701436638832,
+          0.4055940080434084,
+          0.40449900552630424,
+          0.4061788786202669
+        ],
+        "graph": [
+          0.39825099520385265,
+          0.40034111589193344,
+          0.39903982542455196,
+          0.3998710308223963
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0016798730939626694,
+      "graph_rank_spread_ms": 0.0020901206880807877,
+      "custom_error": "unsupported_at_this_size",
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "prefill_mid_f32",
+      "shape": [
+        2048,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 41.94304,
+      "median_ms": 0.22691511549055576,
+      "min_ms": 0.22196187637746334,
+      "algbw_GBs": 188.9650632105516,
+      "busbw_GBs": 283.4475948158274,
+      "graph_median_ms": 0.22266653832048178,
+      "graph_min_ms": 0.217850087210536,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.22196187637746334,
+          0.22288807667791843,
+          0.22109807468950748,
+          0.221331138163805
+        ],
+        "graph": [
+          0.217850087210536,
+          0.21575996652245522,
+          0.21721911616623402,
+          0.21619489416480064
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0017900019884109497,
+      "graph_rank_spread_ms": 0.0020901206880807877,
+      "custom_error": "unsupported_at_this_size",
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "engram_bf16",
+      "shape": [
+        8192,
+        256
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 4.194304,
+      "median_ms": 0.056750024668872356,
+      "min_ms": 0.05577690899372101,
+      "algbw_GBs": 75.19785652647346,
+      "busbw_GBs": 112.79678478971019,
+      "graph_median_ms": 0.04952354356646538,
+      "graph_min_ms": 0.04833494313061237,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.05577690899372101,
+          0.05549611523747444,
+          0.055794836953282356,
+          0.05601695738732815
+        ],
+        "graph": [
+          0.04833494313061237,
+          0.04850002005696297,
+          0.048802001401782036,
+          0.048893969506025314
+        ],
+        "custom": [
+          0.046106986701488495,
+          0.04600384272634983,
+          0.04646787419915199,
+          0.0460590235888958
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0005208421498537064,
+      "graph_rank_spread_ms": 0.000559026375412941,
+      "custom_rank_spread_ms": 0.00046403147280216217,
+      "custom_median_ms": 0.04966394044458866,
+      "custom_min_ms": 0.046106986701488495,
+      "custom_speedup": 1.2097279172642252,
+      "custom_graph_median_ms": 0.0385739840567112,
+      "custom_graph_min_ms": 0.03735395148396492,
+      "custom_graph_speedup": 1.4931996958250744,
+      "custom_graph_vs_nccl_graph_speedup": 1.2939713527057854,
+      "flashinfer_error": "unavailable"
+    },
+    {
+      "name": "indexer_f32",
+      "shape": [
+        8192,
+        512
+      ],
+      "dtype": "torch.float32",
+      "MB": 16.777216,
+      "median_ms": 0.11137942783534527,
+      "min_ms": 0.10958686470985413,
+      "algbw_GBs": 153.09513639631834,
+      "busbw_GBs": 229.6427045944775,
+      "graph_median_ms": 0.10433944407850504,
+      "graph_min_ms": 0.10208203457295895,
+      "per_rank_min_ms": {
+        "nccl": [
+          0.10958686470985413,
+          0.10917708277702332,
+          0.10903296060860157,
+          0.10912609286606312
+        ],
+        "graph": [
+          0.10208203457295895,
+          0.10165199637413025,
+          0.10220706462860107,
+          0.1024280209094286
+        ],
+        "custom": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "flashinfer": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "nccl_rank_spread_ms": 0.0005539041012525558,
+      "graph_rank_spread_ms": 0.0007760245352983475,
+      "custom_error": "unsupported_at_this_size",
+      "flashinfer_error": "unavailable"
+    }
+  ],
+  "custom_backend": "custom_allreduce+symm_mem",
+  "custom_available": true,
+  "custom_disabled_reason": null
+}

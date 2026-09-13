@@ -1,0 +1,32 @@
+{
+  "length": 8192,
+  "rank": 0,
+  "reps": 2,
+  "atomic_vs_atomic": {
+    "max": 6.166498184204102,
+    "top1": 0.8826904296875,
+    "first_diff_pos": 43
+  },
+  "fixed_vs_fixed": {
+    "max": 0.0,
+    "top1": 1.0,
+    "first_diff_pos": -1
+  },
+  "fixed_vs_atomic": {
+    "max": 5.045080184936523,
+    "top1": 0.86865234375,
+    "first_diff_pos": 2
+  },
+  "atomic_first_diff_block": 0,
+  "fixed_first_diff_block": -1,
+  "routing_atomic_first_diff_moe_layer": 2,
+  "routing_fixed_first_diff_moe_layer": -1,
+  "routing_fixed_vs_atomic_first_diff_moe_layer": 1,
+  "fixed_temp_GiB": 0.9375,
+  "atomic_peak_GiB": 78.20122146606445,
+  "fixed_peak_GiB": 78.20122146606445,
+  "peak_delta_GiB": 0.0,
+  "atomic_min_ms": 2415.226822020486,
+  "fixed_min_ms": 2463.86292995885,
+  "fixed_overhead_ms": 48.63610793836415
+}

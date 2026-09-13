@@ -1,0 +1,32 @@
+{
+  "length": 2048,
+  "rank": 0,
+  "reps": 2,
+  "atomic_vs_atomic": {
+    "max": 11.56612491607666,
+    "top1": 0.7578125,
+    "first_diff_pos": 8
+  },
+  "fixed_vs_fixed": {
+    "max": 0.0,
+    "top1": 1.0,
+    "first_diff_pos": -1
+  },
+  "fixed_vs_atomic": {
+    "max": 9.201132774353027,
+    "top1": 0.7763671875,
+    "first_diff_pos": 1
+  },
+  "atomic_first_diff_block": 0,
+  "fixed_first_diff_block": -1,
+  "routing_atomic_first_diff_moe_layer": 3,
+  "routing_fixed_first_diff_moe_layer": -1,
+  "routing_fixed_vs_atomic_first_diff_moe_layer": 2,
+  "fixed_temp_GiB": 0.234375,
+  "atomic_peak_GiB": 75.70174026489258,
+  "fixed_peak_GiB": 75.70174026489258,
+  "peak_delta_GiB": 0.0,
+  "atomic_min_ms": 784.5671428367496,
+  "fixed_min_ms": 795.8508958108723,
+  "fixed_overhead_ms": 11.283752974122763
+}

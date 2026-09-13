@@ -104,18 +104,18 @@ configuration in [`results/trusted-shipped.json`](results/trusted-shipped.json):
 | 2,048 tokens | 2,580 tok/s | 0.79 s | 30.81 tok/s | 32.46 ms/token |
 | 8,192 tokens | 3,392 tok/s | 2.42 s | 30.71 tok/s | 32.56 ms/token |
 
-- Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Reported throughput is the slowest GPU worker.
-- The run compares only the last prompt position. A separate full-prompt diagnostic is covered under [Limits](#limits).
-- HTTP queueing, backend sampling and serving token delivery are excluded. End-to-end serving throughput is not measured.
-- These results use optimized GPU kernels and a generated expert-placement file calibrated on random token IDs. The file is not committed, so a deployment needs its own calibration and validation on realistic traffic. Fused `hc_mixes` is disabled.
+- Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Throughput is the slowest GPU worker.
+- The run compares only the last prompt position; see [Limits](#limits).
+- HTTP queueing, backend sampling and token delivery are excluded, so end-to-end serving throughput is not measured.
+- Results use optimized GPU kernels and an expert-placement file calibrated on random token IDs. The file is not committed, so a deployment needs its own calibration on realistic traffic. Fused `hc_mixes` is disabled.
 - Earlier runs and before/after comparisons are in the [detailed results](docs/OPTIMIZE-RESULTS.md).
 
 ### Limits
 
-- Decode agreement holds only for the same starting state. Both compared paths produced identical prediction scores in the saved run, but that does not show that they build equivalent state during prompt processing, or validate code used by both paths.
-- Whole-prompt prompt processing is not established. The trusted run compares only the last prompt position, where the paths agree (top-1 1.0, maximum score difference 0.68–1.00 against a 1.25 gate). The [full-prompt diagnostic run](results/fulllogits-hcmixes-off.json) recorded maximum score differences of about 15.7–16.1 with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount because the grouped prefill's `atomic_add` reduction is nondeterministic. That run was marked failed by an earlier gate that included the whole-prompt numbers; the current gate checks the last position only. Neither result establishes whole-prompt correctness.
-- Multiple-request performance is untested. The optimized decode graph handles one token from one request; the measurements do not cover batches of 2, 4 or 8.
-- There is no matched vLLM comparison. The local vLLM results use different workloads and measurement methods, so they do not give a controlled speedup.
+- **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position, where the two paths agree. Over the whole prompt they differ by 15.7–16.1 on the logits with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
+- **Decode agreement holds only for a shared starting state.** It does not show that prompt processing builds equivalent state.
+- **One request at a time.** The optimized decode graph handles one token from one request; batches of 2, 4 and 8 are unmeasured.
+- **No matched vLLM comparison.** Local vLLM numbers use different workloads and methods, so the speedup is uncontrolled.
 
 ## Next steps
 

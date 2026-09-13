@@ -178,6 +178,14 @@ in dispatch order; registration does not prove which handles each call.
 **Priority rationale:** a bounded transport experiment before an EP/pipeline
 rewrite. Re-profile after MoE changes because they alter collective waiting.
 
+**Status (September 13).** Measured in [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#collectives).
+Custom allreduce is CUDA-graph-capturable under vLLM's supported capture
+procedure and is 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is
+1.2-1.3x faster than eager NCCL there and no faster at prefill sizes. Both decline
+or are unsupported at prefill sizes. The remaining open item is the end-to-end
+gain under real rank skew and concurrency: no backend has been switched in the
+engine.
+
 ## 3. Qualify existing fusion and close graph/host gaps
 
 The first pass enabled fused `hc_pre`/`hc_post` after correcting association order.

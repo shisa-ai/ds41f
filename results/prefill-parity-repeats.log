@@ -1,0 +1,92 @@
+W0913 16:04:00.874000 1213115 site-packages/torch/distributed/run.py:982] 
+W0913 16:04:00.874000 1213115 site-packages/torch/distributed/run.py:982] *****************************************
+W0913 16:04:00.874000 1213115 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0913 16:04:00.874000 1213115 site-packages/torch/distributed/run.py:982] *****************************************
+/root/glm-testing/ds41f/inference/check_prefill_parity.py:55: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_prefill_parity.py:55: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_prefill_parity.py:55: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_prefill_parity.py:55: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+  [placement] file=/root/glm-testing/ds41f/inference/expert_placement.pt sha256=e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030 layers=40 experts=384
+  [placement] layer 0 redistributed
+  [placement] layer 1 redistributed
+  [placement] layer 2 redistributed
+  [placement] layer 3 redistributed
+  [placement] layer 4 redistributed
+  [placement] layer 5 redistributed
+  [placement] layer 6 redistributed
+  [placement] layer 7 redistributed
+  [placement] layer 8 redistributed
+  [placement] layer 9 redistributed
+  [placement] layer 10 redistributed
+  [placement] layer 11 redistributed
+  [placement] layer 12 redistributed
+  [placement] layer 13 redistributed
+  [placement] layer 14 redistributed
+  [placement] layer 15 redistributed
+  [placement] layer 16 redistributed
+  [placement] layer 17 redistributed
+  [placement] layer 18 redistributed
+  [placement] layer 19 redistributed
+  [placement] layer 20 redistributed
+  [placement] layer 21 redistributed
+  [placement] layer 22 redistributed
+  [placement] layer 23 redistributed
+  [placement] layer 24 redistributed
+  [placement] layer 25 redistributed
+  [placement] layer 26 redistributed
+  [placement] layer 27 redistributed
+  [placement] layer 28 redistributed
+  [placement] layer 29 redistributed
+  [placement] layer 30 redistributed
+  [placement] layer 31 redistributed
+  [placement] layer 32 redistributed
+  [placement] layer 33 redistributed
+  [placement] layer 34 redistributed
+  [placement] layer 35 redistributed
+  [placement] layer 36 redistributed
+  [placement] layer 37 redistributed
+  [placement] layer 38 redistributed
+  [placement] layer 39 redistributed
+  [placement] applied /root/glm-testing/ds41f/inference/expert_placement.pt
+/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank 1] last-position prefill: 788.8 ms (2596 tok/s)[rank 0] last-position prefill: 788.8 ms (2596 tok/s)[rank 2] last-position prefill: 788.8 ms (2596 tok/s)[rank 3] last-position prefill: 788.8 ms (2596 tok/s)
+
+
+
+[rank 3] optimized vs naive   rep0: max= 16.2877 top1=0.7495[rank 2] optimized vs naive   rep0: max= 16.2877 top1=0.7495
+
+[rank 1] optimized vs naive   rep0: max= 16.2877 top1=0.7495
+[rank 0] optimized vs naive   rep0: max= 16.2877 top1=0.7495
+[rank 3] optimized vs naive   rep1: max= 16.2877 top1=0.8696
+[rank 2] optimized vs naive   rep1: max= 16.2877 top1=0.8696
+[rank 1] optimized vs naive   rep1: max= 16.2877 top1=0.8696
+[rank 0] optimized vs naive   rep1: max= 16.2877 top1=0.8696
+[rank 2] optimized vs naive   rep2: max= 16.2877 top1=0.7500
+[rank 3] optimized vs naive   rep2: max= 16.2877 top1=0.7500
+[rank 1] optimized vs naive   rep2: max= 16.2877 top1=0.7500
+[rank 0] optimized vs naive   rep2: max= 16.2877 top1=0.7500
+[rank 2] optimized vs itself   rep1: max= 11.3460 top1=0.7720
+[rank 3] optimized vs itself   rep1: max= 11.3460 top1=0.7720
+[rank 1] optimized vs itself   rep1: max= 11.3460 top1=0.7720
+[rank 0] optimized vs itself   rep1: max= 11.3460 top1=0.7720
+[rank 2] optimized vs itself   rep2: max=  8.7267 top1=0.8892
+[rank 3] optimized vs itself   rep2: max=  8.7267 top1=0.8892
+[rank 1] optimized vs itself   rep2: max=  8.7267 top1=0.8892
+[rank 0] optimized vs itself   rep2: max=  8.7267 top1=0.8892
+[rank 2] naive     vs itself   rep1: max=  0.0000 top1=1.0000
+[rank 3] naive     vs itself   rep1: max=  0.0000 top1=1.0000
+[rank 1] naive     vs itself   rep1: max=  0.0000 top1=1.0000
+[rank 0] naive     vs itself   rep1: max=  0.0000 top1=1.0000
+[rank 1] naive     vs itself   rep2: max=  0.0000 top1=1.0000
+[rank 2] naive     vs itself   rep2: max=  0.0000 top1=1.0000
+[rank 3] naive     vs itself   rep2: max=  0.0000 top1=1.0000
+[rank 0] naive     vs itself   rep2: max=  0.0000 top1=1.0000
