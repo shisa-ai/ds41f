@@ -306,3 +306,82 @@ def test_batched_sampling_writes_next_ids_on_device():
     be.execute(plan, StateStore(3, 100))
     # positions 0..2 are the prompt; position 3 is the sampled continuation
     assert be._tokens[:, 3].tolist() == [100, 101, 102]
+
+
+class UniformLogitsStubModel:
+    """10 equally likely tokens, so top_p=0.9 and top_p=1.0 differ in support."""
+
+    def forward(self, input_ids, start_pos, images=None, token_types=None):
+        import torch
+
+        B = input_ids.shape[0]
+        return (
+            torch.zeros(B, dtype=torch.long, device=input_ids.device),
+            torch.zeros((B, 10)),
+            None,
+        )
+
+
+def _uniform_rows(top_p):
+    return tuple(
+        PlanRow(
+            req_id=i + 1,
+            row=RowRef(slot=i, generation=0),
+            prompt_tokens=(0,),
+            positions=(0,),
+            max_new_tokens=1,
+            temperature=1.0,
+            top_p=top_p,
+        )
+        for i in range(2)
+    )
+
+
+def _uniform_support(top_p, draws=300):
+    import torch
+
+    torch.manual_seed(0)
+    be = ReferenceBackend(UniformLogitsStubModel(), eos_token_id=500)
+    seen = set()
+    for _ in range(draws):
+        be._reset()
+        res = be.execute(
+            StepPlan(ordinal=0, op="prefill", rows=_uniform_rows(top_p)),
+            StateStore(2, 100),
+        )
+        seen.update(r.tokens[0] for r in res)
+    return seen
+
+
+def test_top_p_one_keeps_full_support():
+    """The removed `if bool((tops < 1.0).any())` guard skipped the top-p block
+    whenever every row asked for top_p=1.0. The block is now always applied, and
+    at top_p=1.0 it must keep the whole vocabulary."""
+    assert _uniform_support(1.0) == set(range(10))
+
+
+def test_top_p_below_one_still_truncates():
+    """Always running the filter must not widen the nucleus: with ten equally
+    likely tokens, top_p=0.9 keeps nine of them."""
+    assert len(_uniform_support(0.9)) == 9
+
+
+def test_greedy_row_ignores_top_p():
+    """The removed `if bool(greedy.any())` guard applied torch.where only when some
+    row was greedy. Applying it unconditionally must not change greedy semantics:
+    a greedy row takes its raw argmax even when its top_p would exclude it."""
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    rows = tuple(
+        PlanRow(
+            req_id=i + 1,
+            row=RowRef(slot=i, generation=0),
+            prompt_tokens=(100, 101, 102),
+            positions=(0, 1, 2),
+            max_new_tokens=4,
+            temperature=0.0,
+            top_p=0.01,
+        )
+        for i in range(2)
+    )
+    res = be.execute(StepPlan(ordinal=0, op="prefill", rows=rows), StateStore(2, 100))
+    assert [r.tokens for r in res] == [(100,), (101,)]

@@ -33,7 +33,14 @@ DEVICE = "cuda"  # set by ReferenceBackend.__init__ (module-level default)
 
 
 class ReferenceBackend:
-    def __init__(self, model, eos_token_id: int, sampler=None, device: str = "cuda"):
+    def __init__(
+        self,
+        model,
+        eos_token_id: int,
+        sampler=None,
+        device: str = "cuda",
+        apply_placement: bool = False,
+    ):
         self.model = model
         self.eos_token_id = eos_token_id
         # explicit device: torch's default device is thread-local, and the engine
@@ -43,6 +50,16 @@ class ReferenceBackend:
         DEVICE = device
         # sampler(logits_row, params) -> token_id; default greedy
         self.sampler = sampler
+        # Expert placement is a collective (one all_to_all per layer), so it can only
+        # run here when every TP rank builds its own backend. Single-controller
+        # deployments (rank 0 owns this object, the others are driven inside
+        # model.forward) must instead call expert_placement.maybe_apply on every rank
+        # where the model is loaded. Opt-in, because getting this wrong hangs.
+        self.placement_applied = False
+        if apply_placement:
+            from . import expert_placement
+
+            self.placement_applied = expert_placement.maybe_apply(model)
         self._reset()
 
     def _reset(self) -> None:
@@ -208,25 +225,28 @@ class ReferenceBackend:
         greedy = temps <= 0
         safe_temps = torch.where(greedy, torch.ones_like(temps), temps)
         scaled = rows / safe_temps.unsqueeze(1)  # argmax is scale-invariant
-        if bool((tops < 1.0).any()):
-            sorted_logits, order = scaled.sort(dim=-1, descending=True)
-            sorted_probs = torch.softmax(sorted_logits, -1)
-            cum = sorted_probs.cumsum(-1)
-            # keep everything strictly before the mass crosses top_p
-            keep = (cum - sorted_probs) < tops.unsqueeze(1)
-            keep[:, 0] = True
-            keep = keep | (tops.unsqueeze(1) >= 1.0)
-            filtered = torch.full_like(scaled, float("-inf"))
-            filtered.scatter_(-1, order, torch.where(keep, sorted_logits, float("-inf")))
-            scaled = filtered
+        # No host-side branch on the parameters: `bool(tops.any())` and `bool(greedy.any())`
+        # each drain the pipeline once per step, and both guards are only shortcuts.
+        # The top-p block is already a no-op for tops >= 1.0 (the `keep |` clause below
+        # keeps every position), and torch.where is correct when no row is greedy.
+        sorted_logits, order = scaled.sort(dim=-1, descending=True)
+        sorted_probs = torch.softmax(sorted_logits, -1)
+        cum = sorted_probs.cumsum(-1)
+        # keep everything strictly before the mass crosses top_p
+        keep = (cum - sorted_probs) < tops.unsqueeze(1)
+        keep[:, 0] = True
+        keep = keep | (tops.unsqueeze(1) >= 1.0)
+        filtered = torch.full_like(scaled, float("-inf"))
+        filtered.scatter_(-1, order, torch.where(keep, sorted_logits, float("-inf")))
+        scaled = filtered
         probs = torch.softmax(scaled, -1)
         # Gumbel-max: argmax_i log p_i + Gumbel_i == argmax_i p_i / Exp_i
         u = torch.rand_like(probs).clamp_min(torch.finfo(probs.dtype).tiny)
         gumbel = -torch.log(-torch.log(u))
         sampled = (probs.log() + gumbel).argmax(-1)
-        if bool(greedy.any()):
-            sampled = torch.where(greedy, rows.argmax(-1), sampled)
-        return sampled
+        # greedy rows ignore top_p, so they take the raw argmax; torch.where is correct
+        # when no row is greedy, so this needs no host-side branch.
+        return torch.where(greedy, rows.argmax(-1), sampled)
 
 
 def _new_tokens_buffer(batch: int, total: int, rows, prompt_lens):
