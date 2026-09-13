@@ -257,7 +257,11 @@ class ReferenceBackend:
 
         if len(stoch) == rows.shape[0]:
             return sampled
-        out = rows.argmax(-1)  # greedy rows ignore top_p entirely
+        # greedy rows ignore top_p and the RNG entirely, so give them only their argmax
+        greedy = [k for k, (t, _) in enumerate(params) if t <= 0]
+        g_idx = torch.tensor(greedy, dtype=torch.long, device=logits.device)
+        out = torch.empty(rows.shape[0], dtype=torch.long, device=rows.device)
+        out[g_idx] = rows.index_select(0, g_idx).argmax(-1)
         out[s_idx] = sampled
         return out
 
