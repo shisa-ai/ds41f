@@ -20,7 +20,8 @@ different protocol.
 Done and measured: the decode kernel work (FP8 GEMV, warp counts), the decode
 fusion pass (RMSNorm, hyper-connections, MoE SwiGLU, rotary embedding; 6,232 to
 4,558 launches/step and 11.9% lower decode latency for the first three, then a
-further 2.3% for the rotary embedding, all bit-identical tokens), the prefill
+further 2.3% for the rotary embedding, then 1.65% for the cached routing weight,
+all bit-identical tokens), the prefill
 MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, two serving-path fixes (symmetric length
 bucketing, batched on-device sampling), the packed token-broadcast protocol, a
@@ -41,6 +42,7 @@ Remaining work and follow-up status:
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion, in a single-process model loop. Pipelining the token read was implemented and measured: it recovers none of it, because the served path's per-step barrier is the blocking NCCL broadcast inside `BroadcastModel.forward`, not the read (median 28.80 ms in `enqueue`, 0.019 ms in `resolve`). See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | Decode rotary embedding | **Fused, 2.3% lower decode latency at identical tokens.** The largest single unfused item in the step's op attribution (0.68 ms/step of `copy_` and `mul`), called 198 times per step in three launches each. One launch per call now, bit-identical to the reference at the contracted product form. Decode only; prefill is untouched. See [Fused rotary embedding](#fused-rotary-embedding). |
+| Cached fp32 gate weight | **Cached, 1.65% lower decode latency at identical tokens.** The gate GEMV runs in fp32, so `Gate.forward` upcast the bf16 routing weight on every one of 40 layers of every step: exact, but 8.5 µs of GPU time per layer for a constant. 27.540 -> 27.085 ms/step. The attribution that found it needed the MoE's own decode graph bypassed, which is why the kernel-name view had the routing at 0.67 ms/step rather than 1.46. See [Caching the routing weight cast](#caching-the-routing-weight-cast). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
@@ -638,6 +640,7 @@ The checks are listed in [Verification](#verification).
 | Fused `hc_mixes` coefficient math | ~5/layer | 2/layer | ~120 | +0.422 | +1.47% | identical |
 | **All three together** | | | **1,674** | **+3.883** | **11.9% lower** | **identical** |
 | Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
+| Cached fp32 gate weight | 1 cast/layer | 0/layer | 40 | +0.456 | +1.65% | identical |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
@@ -869,10 +872,58 @@ Three things this changes:
   `index_copy_` and the `remainder` around them are **0.28 ms/step** (1.0%), spread
   over three functions.
 - `MoE.forward` is 31% of non-collective kernel time and its non-GEMM half
-  (elementwise 1.51, routing 0.67, `act_quant` 0.52) is **2.70 ms/step**. The
-  routing chain is the largest thing in the step that is neither a GEMM nor a
-  collective, and it is inside a replayed graph, so attributing it further needs
-  the MoE decode graph disabled rather than more analysis of this trace.
+  (elementwise 1.51, routing 0.67, `act_quant` 0.52) is **2.70 ms/step**. That half
+  is inside a replayed graph, so this trace cannot say which statement issued it;
+  `DSV41F_PROFILE_MOE_EAGER=1` bypasses the MoE's own decode graph and re-profiles,
+  which is what the next section does. The kernel sequence is identical either way,
+  so the per-kernel counts stand.
+
+### Caching the routing weight cast
+
+The [attribution](#attributing-launches-to-the-function-that-issued-them) above is
+what found this one, after re-profiling with the MoE's decode graph bypassed
+(`DSV41F_PROFILE_MOE_EAGER=1`, `results/decode-stacks-attribution-moe-eager.txt`).
+The kernel-name view put the MoE's routing at 0.67 ms/step; opening the graph put
+`Gate.forward` at **1.46 ms/step**, of which the largest single item was a `copy_`
+at 0.548 ms -- 80 of them per step, two per layer, 6.9 µs each.
+
+The gate GEMV runs in fp32, and `Gate.forward` wrote
+`linear(x.float(), self.weight.float())`. One of those casts is the activation and
+is unavoidable; the other is the **routing weight**, upcast from bf16 on every
+call. It is an exact cast, but it is 3.9 MB of read and 7.9 MB of write, and on a
+`[384, 5120]` tensor it measured **8.5 µs of GPU time** back to back. Forty layers,
+so 0.34 ms of a 27.5 ms step was re-deriving a constant.
+
+The cache has to be invalidated correctly, and the two ways this weight changes in
+practice move *different* markers:
+
+- `load_state_dict` copies into the parameter and bumps its version counter.
+- `expert placement` reassigns `.data`
+  (`gate.weight.data = gate.weight.data[n2o].contiguous()`), which moves the data
+  pointer and **does not** bump the version counter.
+
+So a cache keyed on the version alone would serve the pre-placement weight for the
+life of the process. The check is on both, and it holds a reference to the source
+storage as well -- that is what makes the pointer check sound, since it keeps the
+old address alive and a later allocation cannot land on it and pass for the weight.
+There is no numeric gate to pass here, because the cached tensor is the same value
+by construction; `check_gate_weight_cache.py` instead compares bit patterns against
+the uncached expression after each mutation and after an in-place `mul_`, and gets
+**0 of 6,624 compared bits** differing. Real-model parity
+(`check_decode_parity.py --flag _GATE_WEIGHT_CACHE`) is prefill logits bit-equal
+over **66,191,360** values, decode logits bit-equal at every step, and no differing
+token in 64 steps.
+
+One thing that is silent and worth writing down: the cache is a **tuple**, not a
+bare tensor. `nn.Module.__setattr__` registers any Tensor it sees as a buffer, so a
+plain attribute holding the cached weight would appear in `state_dict()` and make a
+strict load fail on a key that is only a cache. The check asserts `state_dict()` is
+still exactly `{weight, bias}`.
+
+Interleaved A/B, four repeats: **27.085 ms/step cached against 27.540 uncached,
++0.456 ms/step (+1.65%)**, identical tokens. `DSV41F_GATE_WEIGHT_CACHE=0` restores
+the uncached expression, for a caller that changes the weight by a route the
+invalidation does not see.
 
 ### Why the reductions stayed in torch
 
@@ -1529,6 +1580,14 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   fused `hc_mixes` coefficient math at decode (0 of 4,800 fp32 elements differ over
   200 draws at four seeds), and `check_act_quant_cache.py` does the same for the cached
   `act_quant` path (0 differing bytes over 3 reps x 3 shapes).
+- `check_gate_weight_cache.py` covers the one decode change that is exact by
+  construction and so has no numeric gate: the cached fp32 routing weight. It
+  compares bit patterns against the uncached expression after each way the weight
+  actually changes (`load_state_dict`, an expert-placement `.data` reassignment,
+  an in-place `mul_`) and asserts the cache did not leak into `state_dict()`. 0 of
+  6,624 compared bits. `check_decode_parity.py --flag _GATE_WEIGHT_CACHE` is the
+  real-model gate: prefill logits bit-equal over 66,191,360 values, decode logits
+  bit-equal at every step, no differing token in 64 steps.
 - `probe_step_host_time.py` and `probe_sync_spin.py` are the control pair behind the
   withdrawn 0.02 ms enqueue figure: the first measures host time inside a decode
   step, the second shows `time.process_time()` tracks wall time during a pure GPU
@@ -1616,7 +1675,19 @@ experts. A recorded example is `results/manifest-shipped.json`
   `[8192, 5120]` by `[5120, 384]`) runs in fp32 and costs 47 ms of an 8K prefill
   (2%). It selects experts, so changing its precision changes which experts run,
   not just the values. Not attempted; the same fused approach used for `hc_mixes`
-  would apply, but the sensitivity is higher and the prize is smaller.
+  would apply, but the sensitivity is higher and the prize is smaller. The *cast*
+  of its weight was a separate matter and is done
+  ([Caching the routing weight cast](#caching-the-routing-weight-cast)); the
+  projection itself still runs in fp32.
+- **The rest of `Gate.forward`.** Caching the weight cast leaves 1.46 - 0.456 =
+  ~1.0 ms/step in the gate: `aten::topk` 0.438, `aten::sum` 0.084, `aten::add`
+  0.089, `aten::softplus` 0.068, `aten::gather` 0.059, `aten::div_`/`div` 0.090,
+  `aten::sqrt` 0.049, `aten::mul_` 0.036, plus the fp32 GEMV and `x.float()`.
+  Nothing between the GEMV and the top-k needs to be separate launches, but a fused
+  replacement has to reproduce `torch`'s `softplus`, `sqrt`, `sum` order and the
+  top-k tie-breaking bit-for-bit, which is the class of thing that took three
+  attempts on the rotary embedding and was abandoned outright for the two `mean`s.
+  Not attempted.
 - **Custom or symmetric-memory collectives (section 2).** Integrated behind
   `DSV41F_CUSTOM_AR=1 DSV41F_EXPANDABLE_SEGMENTS=0`, measured at 4.8% on the served
   decode step (29.0 -> 27.6 ms), and numerically verified at the call sites to

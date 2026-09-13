@@ -1,0 +1,17 @@
+{
+  "change": "cache the fp32 routing weight in Gate.forward",
+  "flag": "_GATE_WEIGHT_CACHE",
+  "harness": "bench_ab.py --flag _GATE_WEIGHT_CACHE --repeats 4",
+  "env": "DSV41F_ENGRAM_OFFLOAD=1, TP4, B=1, 2048 context, worst rank",
+  "on_ms_per_step": [27.159, 27.045, 27.100, 27.069],
+  "off_ms_per_step": [27.508, 27.596, 27.572, 27.498],
+  "on_median": 27.085,
+  "off_median": 27.540,
+  "delta_ms_per_step": 0.456,
+  "delta_percent_latency": 1.65,
+  "identical_tokens": true,
+  "exactness": {
+    "check_gate_weight_cache.py": "0 of 6624 compared bits differ, over 3 shapes and after load_state_dict, an expert-placement .data reassignment, and an in-place mul_",
+    "check_decode_parity.py": "prefill logits bit-equal 66191360/66191360, decode logits bit-equal at every step, first differing token step = None (64 steps)"
+  }
+}
