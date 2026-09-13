@@ -112,6 +112,13 @@ processing is unchanged within noise (1,330 to 1,346, 2,580 to 2,573, 3,392 to
 3,366 tok/s): the fused kernels are decode-only, and prefill keeps the reference
 expressions. See [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
 
+This table was measured before the rotary-embedding fusion, which is now on by
+default. Its own interleaved A/B measures **2.3% lower decode latency at identical
+tokens** (28.365 → 27.714 ms/step); the re-run of this table on the same day could
+not confirm a headline figure because the machine was noisier than it was for the
+run above, and the measurement and that limitation are both recorded in
+[Fused rotary embedding](docs/OPTIMIZE-RESULTS.md#fused-rotary-embedding).
+
 - Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Throughput is the slowest GPU worker.
 - The run compares only the last prompt position; see [Limits](#limits).
 - HTTP queueing, backend sampling and token delivery are excluded, so these are model-loop numbers. Served latency is measured in [Served latency](#served-latency).

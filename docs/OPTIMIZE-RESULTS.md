@@ -636,8 +636,8 @@ The checks are listed in [Verification](#verification).
 | Fused RMSNorm at decode | 8/norm | 2/norm | ~1,000 | +1.793 | +5.85% | identical |
 | Fused SwiGLU+route in the MoE | 9/layer | 1/layer | ~320 | +0.569 | +1.93% | identical |
 | Fused `hc_mixes` coefficient math | ~5/layer | 2/layer | ~120 | +0.422 | +1.47% | identical |
-| Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
 | **All three together** | | | **1,674** | **+3.883** | **11.9% lower** | **identical** |
+| Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
@@ -665,10 +665,10 @@ baseline; see [Fused rotary embedding](#fused-rotary-embedding).
 
 ### Fused rotary embedding
 
-The launch-count table above groups kernels by name, which says *what* ran but not
-*which line* emitted it. Joining the trace's kernel, runtime and CPU-op levels by
-correlation id and source frame (`profile_decode_stacks.py`) ranks the step by the
-line that emits each launch, and the largest single unfused item was
+The step budget's launch-count table groups kernels by name, which says *what* ran
+but not *which line* emitted it. Joining the trace's kernel, runtime and CPU-op
+levels by correlation id and source frame (`profile_decode_stacks.py`) ranks the
+step by the line that emits each launch, and the largest single unfused item was
 `apply_rotary_emb` (`model.py`): **0.519 ms/step of `aten::copy_` plus 0.160 ms of
 `aten::mul`, 0.68 ms or 2.8% of the step**.
 
@@ -735,9 +735,24 @@ path is bit-identical there, not merely close.
 Decode only. The reference indexes frequencies by sequence position and broadcasts
 them over heads, so a multi-position tensor does not have uniform rows; the guard
 requires a single position and leaves prefill on the reference expression. Prefill
-is therefore unchanged, and its last-position gate values in the trusted run (0.51,
-0.54, 0.68, 0.71, 1.01, 1.06) sit inside the recorded spread of the pre-existing
-prefill nondeterminism described in [Noise floor](#noise-floor).
+is therefore unchanged, and its last-position gate values in the trusted run (0.49
+to 1.25) sit inside the recorded spread of the pre-existing prefill
+nondeterminism described in [Noise floor](#noise-floor).
+
+The trusted re-run behind these numbers was made on a noisier machine than the
+earlier runs, and that is worth recording rather than smoothing over. Its parity
+result is clean -- 12 of 12 checks at decode `max_logit_diff` 0.0 and
+`top1_agreement` 1.0, status `passed` -- but its latency is not: four repeats at
+8,192 tokens give 27.47, 29.78, 27.49 and 29.01 ms/step
+(`results/trusted-rope-fused-4rep.json`), while `results/trusted-sgbatch.json`,
+`trusted-shipped.json` and `trusted-fused.json` each have repeats within 0.1 ms of
+each other. The four-repeat medians are 27.45, 27.51 and 28.25 ms/step at 512,
+2,048 and 8,192 against 27.94, 28.05 and 28.04 in the earlier run, so two lengths
+read better and one reads worse by more than the effect being measured. The
+interleaved A/B is the instrument that survives this: it alternates arms inside one
+process and both runs agree to 0.02 ms. The 4.6% spread in this harness is not
+attributable to a decode-only change of 0.66 ms, and no headline number is taken
+from it.
 
 ### Host dispatch caching
 
