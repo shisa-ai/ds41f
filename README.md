@@ -6,11 +6,12 @@ attention caches and Engram memory, keeps each request's state separate, and run
 requests in fixed batches.
 
 **Status — September 13, 2026:** the reference backend and external four-GPU HTTP/SSE
-server are implemented. The latest saved model measurements report **30.62 tok/s
-decode at 2K context** and **3,270 tok/s prefill at 8K** on four H20-3e GPUs.
-That run failed correctness checks; these are timings, not a validated release benchmark.
-Correctness after prompt processing, quality on realistic tasks and performance
-with concurrent requests still need validation. This is an experimental engine.
+server are implemented. The trusted saved model measurements report **30.81 tok/s
+decode at 2K context** and **3,392 tok/s prefill at 8K** on four H20-3e GPUs
+(`results/trusted-shipped.json`, which passes the harness's parity gate).
+Whole-prompt prompt-processing parity is still unresolved, and quality on
+realistic tasks and performance with concurrent requests still need validation.
+This is an experimental engine.
 
 See [optimization results](docs/OPTIMIZE-RESULTS.md) for measurements and
 [the reviewed optimization plan](docs/OPTIMIZE.md) for evidence limits and next steps.
@@ -118,19 +119,21 @@ measurements.
 
 ## Performance results (one request, four GPUs, text)
 
-The latest saved [full-prompt diagnostic run](results/fulllogits-hcmixes-off.json)
-contains these timings, averaged over two runs of the optimized configuration:
+The trusted [comparison run](results/trusted-shipped.json) contains these timings,
+averaged over two runs of the optimized configuration:
 
 | Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
 | --- | ---: | ---: | ---: | ---: |
-| 2,048 tokens | **2,560 tok/s** | 0.80 s | **30.62 tok/s** | 32.66 ms/token |
-| 8,192 tokens | **3,270 tok/s** | 2.51 s | **29.29 tok/s** | 34.20 ms/token |
+| 512 tokens | **1,330 tok/s** | 0.38 s | **30.86 tok/s** | 32.40 ms/token |
+| 2,048 tokens | **2,580 tok/s** | 0.79 s | **30.81 tok/s** | 32.46 ms/token |
+| 8,192 tokens | **3,392 tok/s** | 2.42 s | **30.71 tok/s** | 32.56 ms/token |
 
 The model runs after kernel compilation and warmup, with random-token prompts
 and predetermined continuation tokens. Each comparison measures 32 decode steps
-and reports the slowest GPU worker. Full-prompt prediction scores are compared
-in a separate, untimed pass. HTTP queueing, backend sampling and serving token
-delivery are excluded. **Current end-to-end serving throughput is not measured.**
+and reports the slowest GPU worker. This run compares only the last prompt
+position; a separate full-prompt diagnostic run is discussed under the limits.
+HTTP queueing, backend sampling and serving token delivery are excluded.
+**Current end-to-end serving throughput is not measured.**
 
 These results use optimized GPU kernels and a generated expert-placement file
 calibrated on random token IDs. The file is not committed; a deployment needs
@@ -144,13 +147,16 @@ Earlier runs and before/after comparisons remain in the
   identical prediction scores in the saved run. This does not establish that
   they build equivalent state during prompt processing, or validate code changes
   used by both paths.
-- **Prompt processing still has unresolved numerical differences.** The
-  [run used above](results/fulllogits-hcmixes-off.json) is marked failed:
-  it records maximum prediction-score differences of about 15.7–16.1, with the
-  highest-scoring token matching at 76.8–81.2% of prompt positions across its
-  2K/8K comparisons. Repeated runs of the same configuration also
-  vary, as documented in the results writeup. That variation does not establish
-  correctness or justify ignoring a failed check.
+- **Whole-prompt prompt processing is not established.** The trusted run above
+  compares only the last prompt position, where the two paths agree (top-1 1.0,
+  maximum score difference 0.68–1.00 against a 1.25 gate). A separate
+  [full-prompt diagnostic run](results/fulllogits-hcmixes-off.json) recorded
+  maximum prediction-score differences of about 15.7–16.1 with 76.8–81.2% top-1
+  agreement, and repeated runs of the same configuration vary by a similar amount
+  because the grouped prefill's `atomic_add` reduction is nondeterministic. That
+  diagnostic run was marked failed by an earlier gate that included the
+  whole-prompt numbers; the current gate is last-position-only. Neither result
+  establishes whole-prompt correctness.
 - **Multiple-request performance still needs testing.** The optimized decode
   graph handles one token from one request at a time; these gains do not establish
   performance for batches of 2, 4 or 8 requests.
