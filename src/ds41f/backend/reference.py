@@ -85,8 +85,8 @@ class ReferenceBackend:
         self._req_ids: list[int] = []
         self._prev_pos = 0
         self._cur_pos = 0
-        # Pinned staging for the asynchronous token read, double-buffered because
-        # the engine may hold one step's read in flight while the next is issued.
+        # Pinned staging for the token read. Double-buffered so a handle stays valid
+        # if a caller holds one step's read while issuing the next.
         self._pin = [None, None]
         self._pin_slot = 0
 
@@ -102,15 +102,23 @@ class ReferenceBackend:
         sampling draw and the token write-back into `_tokens`. The only host
         interaction is a non-blocking copy of the sampled ids into a pinned
         buffer, issued on the compute stream at the point the sampling kernel
-        retires -- which is *before* the next step is enqueued, so a later
-        blocking read of that buffer does not wait for the next step.
+        retires. `resolve` waits on the recorded event.
 
-        That ordering is the whole point. `sampled.tolist()` inside execute() is
-        a stream-ordered blocking copy, so calling it after enqueueing step i+1
-        would wait for step i+1: the host would still drain the pipeline, and the
-        exposed drain is 3.12 ms/step (probe_decode_cpu.py, 27.99 ms against
-        24.87 ms). Splitting enqueue from resolve is what lets the engine keep the
-        queue non-empty while it reads the previous step's token.
+        The split exists to make the per-step host read overlap the next step's
+        execution. That was tried, measured, and does not pay in the served
+        topology: the served model is `BroadcastModel`, whose `forward` ends in a
+        blocking NCCL broadcast that every rank must arrive at, so a step cannot be
+        enqueued before the previous one has finished everywhere. Under a pipelined
+        engine the host was blocked for a median 28.80 ms inside `enqueue` (the
+        broadcast) and 0.019 ms inside `resolve` (the read), and the served
+        inter-token latency was unchanged at 28.77 -> 28.91 ms. The 3.12 ms/step
+        that `probe_decode_cpu.py` measures is real in a single-process model loop
+        (27.99 ms against 24.87 ms) and is simply not exposed on the served path.
+
+        So the engine calls these two back to back today. They are kept, tested and
+        used because they are the one place that would have to change if the
+        per-step broadcast barrier were removed, and because `execute` is defined as
+        their composition: the contract is the same work in the same order.
 
         Returns an opaque handle for `resolve`.
         """
@@ -151,13 +159,7 @@ class ReferenceBackend:
             plen - min_len + (r.max_new_tokens or 1)
             for r, plen in zip(rows, prompt_lens)
         )
-        # One position of slack. The serial engine runs exactly `window` decode steps
-        # for a cohort; the pipelined loop builds step i's plan before step i-1's
-        # tokens are read, so the rows that finish last are not yet known to be
-        # finished and the cohort takes one more step. That step's own tokens are
-        # discarded, but `_decode` refuses to run past the buffer, so the buffer has
-        # to allow it.
-        total = min_len + window + 1
+        total = min_len + window
         self._tokens = _new_tokens_buffer(len(rows), total, rows, prompt_lens)
         self._prompt_lens = prompt_lens
         self._req_ids = [r.req_id for r in rows]

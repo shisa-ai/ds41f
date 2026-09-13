@@ -76,12 +76,6 @@ class _Request:
         self.meta = meta
         self.created = time.monotonic()
         self.completion: list[int] = []
-        # Steps enqueued for this row whose tokens have not been read yet. The
-        # scheduler's decode position has to describe the step being planned, not the
-        # tokens already delivered, so it counts these as committed: with the
-        # pipelined loop a row has one step in flight at plan time and `completion`
-        # is one token short. Always 0 in the serial path.
-        self.inflight = 0
         self.finish_reason: Optional[FinishReason] = None
         self.cancel_requested = threading.Event()
         self.terminal_sent = False

@@ -139,11 +139,7 @@ class StaticCohortScheduler:
     def _decode_plan(self, active) -> StepPlan:
         rows = []
         for slot, req in sorted(active.items()):
-            # Steps committed, not tokens delivered. The pipelined loop reads step i-1's
-            # tokens after enqueueing step i, so `completion` is one token short when
-            # this plan is built; counting the in-flight step keeps the position the
-            # same as the serial path's, which is what the position means.
-            pos = len(req.prompt_tokens) + len(req.completion) + getattr(req, "inflight", 0)
+            pos = len(req.prompt_tokens) + len(req.completion)
             rows.append(
                 PlanRow(
                     req.req_id,

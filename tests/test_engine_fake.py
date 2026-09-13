@@ -197,80 +197,55 @@ def test_admission_window_delays_a_lone_arrival_by_at_most_the_window(monkeypatc
     assert elapsed < 2.0, elapsed
 
 
-# ------------------------------------------------- pipelined delivery (section 3)
+# ------------------------------------------------- split step contract
 
-def _run_three(monkeypatch, pipeline: bool):
-    """Two requests, one of which stops early, one of which runs to the cap.
+def test_the_engine_uses_the_split_step_contract_when_the_backend_has_one():
+    """The engine prefers enqueue()/resolve() over execute() when both exist.
 
-    Returns the two completions and the plan schedule. The early stop is the
-    interesting case: the finished row has to keep its place in the cohort and keep
-    drawing for as long as the serial path drew for it, or the stream the other row
-    sees shifts.
+    This is the step contract the per-step-synchronization work needs: it is what
+    would let the host read step i-1's tokens while step i is queued. It is *not*
+    overlapped today -- see the note in ReferenceBackend.enqueue -- because the
+    served topology blocks on a per-step broadcast inside the forward, so the token
+    read is never on the critical path. The contract is kept and exercised so that
+    removing that barrier is a change in one place.
     """
-    monkeypatch.setenv("DS41F_PIPELINE", "1" if pipeline else "0")
-    fake = FakeBackend(vocab=1000, stop_token_ids=frozenset({1005}))
+    calls = {"enqueue": 0, "resolve": 0, "execute": 0}
+    fake = FakeBackend()
+
+    orig_enqueue, orig_resolve, orig_execute = fake.enqueue, fake.resolve, fake.execute
+
+    def enqueue(plan, state):
+        calls["enqueue"] += 1
+        return orig_enqueue(plan, state)
+
+    def resolve(staged):
+        calls["resolve"] += 1
+        return orig_resolve(staged)
+
+    def execute(plan, state):
+        calls["execute"] += 1
+        return orig_execute(plan, state)
+
+    fake.enqueue, fake.resolve, fake.execute = enqueue, resolve, execute
     with run_engine(backend=fake) as eng:
-        a = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=6))
-        b = eng.submit([4, 5, 6, 7], SamplingParams(max_new_tokens=6))
-        ha = a.result(timeout=10)
-        hb = b.result(timeout=10)
-    schedule = [(p.op, len(p.rows)) for p in fake.executed]
-    return (ha.token_ids, ha.finish_reason), (hb.token_ids, hb.finish_reason), schedule
+        h = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=3))
+        assert h.result(timeout=10).completion_tokens == 3
+    assert calls["enqueue"] > 0 and calls["enqueue"] == calls["resolve"]
+    assert calls["execute"] == 0
 
 
-def test_the_pipeline_flag_actually_selects_the_pipelined_loop(monkeypatch):
-    """Guards the two tests below: if the flag stopped selecting the loop they would
-    compare the serial path against itself and pass."""
-    from ds41f.backend import FakeBackend as FB
-    from ds41f.engine import EngineConfig as EC
-    from ds41f.engine import LLMEngine as LE
+def test_a_backend_with_only_execute_still_runs():
+    """The Backend protocol is execute()/shutdown(); the split contract is optional."""
+    inner = FakeBackend()
 
-    for value, expected in (("0", False), ("1", True)):
-        monkeypatch.setenv("DS41F_PIPELINE", value)
-        assert LE(FB(), EC())._pipeline is expected
-    # a backend with no split contract must refuse the flag rather than quietly
-    # running the serial loop, which is how a first A/B compared serial to serial
     class OnlyExecute:
         def execute(self, plan, state):
-            return []
+            return inner.execute(plan, state)
 
-    monkeypatch.setenv("DS41F_PIPELINE", "1")
-    with pytest.raises(RuntimeError, match="enqueue"):
-        LE(OnlyExecute(), EC())
+        def shutdown(self):
+            pass
 
-
-def test_pipelined_delivery_is_token_identical_to_serial(monkeypatch):
-    serial = _run_three(monkeypatch, pipeline=False)
-    pipelined = _run_three(monkeypatch, pipeline=True)
-    assert pipelined[0] == serial[0], (serial[0], pipelined[0])
-    assert pipelined[1] == serial[1], (serial[1], pipelined[1])
-
-
-def test_pipelined_delivery_keeps_the_batch_composition(monkeypatch):
-    """Pipelining must not change which rows run together, and must cost at most one
-    extra trailing decode step.
-
-    The extra step is the price of building step i's plan before step i-1's tokens
-    are read: the last rows to finish are not known to be finished yet, so the cohort
-    gets one more step. Its own tokens are discarded (the rows are already terminal
-    by the time it is delivered). On the real backend that step needs one position of
-    slack in the cohort's token buffer.
-    """
-    serial = _run_three(monkeypatch, pipeline=False)[2]
-    pipelined = _run_three(monkeypatch, pipeline=True)[2]
-    assert len(pipelined) - len(serial) in (0, 1), (serial, pipelined)
-    # same op sequence and same batch composition, up to that one trailing step
-    assert pipelined[: len(serial)] == serial, (serial, pipelined)
-    if len(pipelined) > len(serial):
-        assert pipelined[-1][0] == "decode"
-
-
-def test_pipelined_delivery_runs_a_batched_cohort(monkeypatch):
-    """The one extra step a pipelined cohort can take must be legal and harmless."""
-    monkeypatch.setenv("DS41F_PIPELINE", "1")
-    fake = FakeBackend(vocab=1000)
-    with run_engine(backend=fake) as eng:
-        handles = [eng.submit([1, 2, 3], SamplingParams(max_new_tokens=4)) for _ in range(3)]
-        for h in handles:
-            assert h.result(timeout=10).completion_tokens == 4
-    assert any(len(p.rows) == 3 for p in fake.executed), [len(p.rows) for p in fake.executed]
+    assert not hasattr(OnlyExecute(), "enqueue")
+    with run_engine(backend=OnlyExecute()) as eng:
+        h = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=3))
+        assert h.result(timeout=10).completion_tokens == 3

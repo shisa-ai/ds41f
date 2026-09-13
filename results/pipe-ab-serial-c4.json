@@ -1,0 +1,42 @@
+{
+  "mode": "decode",
+  "prompt_tokens_requested": 64,
+  "max_tokens": 128,
+  "concurrency": 4,
+  "repeats": 3,
+  "samples": [
+    {
+      "ttft_s": 0.2289603620301932,
+      "itl_s": 0.06822646430591617,
+      "tokens": 471,
+      "chunks": 471,
+      "prompt_tokens": 61,
+      "total_s": 8.911511400016025,
+      "wave_s": 8.911511400016025,
+      "aggregate_tok_s": 52.85298742917537,
+      "completed": 4
+    },
+    {
+      "ttft_s": 0.22357970499433577,
+      "itl_s": 0.06841567322633366,
+      "tokens": 471,
+      "chunks": 471,
+      "prompt_tokens": 61,
+      "total_s": 8.922037103911862,
+      "wave_s": 8.922037103911862,
+      "aggregate_tok_s": 52.79063452823911,
+      "completed": 4
+    },
+    {
+      "ttft_s": 0.2246125191450119,
+      "itl_s": 0.06819803719408515,
+      "tokens": 471,
+      "chunks": 471,
+      "prompt_tokens": 61,
+      "total_s": 8.894727642880753,
+      "wave_s": 8.894727642880753,
+      "aggregate_tok_s": 52.95271748730648,
+      "completed": 4
+    }
+  ]
+}
