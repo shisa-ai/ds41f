@@ -103,6 +103,23 @@ def test_fingerprint_flags_a_non_permutation_layer(tmp_path):
     assert info["invalid_layers"] == [1]
 
 
+def test_fingerprint_survives_a_cuda_default_device(tmp_path):
+    """The serving loader sets the default device to CUDA before applying placement,
+    while the artifact loads to CPU. A default-device arange made fingerprint raise
+    with a device mismatch instead of validating the permutation."""
+    if not torch.cuda.is_available():
+        pytest.skip("no CUDA device")
+    path = _write_placement(tmp_path / "p.pt", layers=2, experts=4)
+    prev = torch.get_default_device()
+    try:
+        torch.set_default_device("cuda")
+        info = ep.fingerprint(str(path))
+    finally:
+        torch.set_default_device(prev)
+    assert info["valid_permutation"] is True
+    assert info["experts"] == 4
+
+
 def test_check_expected_hash_accepts_match_and_rejects_mismatch(tmp_path):
     path = _write_placement(tmp_path / "p.pt")
     info = ep.fingerprint(str(path))

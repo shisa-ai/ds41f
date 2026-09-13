@@ -1,0 +1,47 @@
+{
+  "command": "DSV41F_ENGRAM_OFFLOAD=1 CUDA_VISIBLE_DEVICES=0,1,2,3 DSV41F_EXPERT_PLACEMENT_SHA256=e8cab35b... torchrun --nproc-per-node 4 --master-port 29512 verify_placement_dispatch.py --ckpt /data/ds41f/DSV41F-TP4 --max-context 4096",
+  "created_at": "2026-09-13T12:34:33+0800",
+  "exit_code": 0,
+  "pin": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+  "report": {
+    "applied": true,
+    "per_rank": [
+      {
+        "experts": 384,
+        "layers": 40,
+        "placement": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+        "rank": 0,
+        "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+        "valid_permutation": true
+      },
+      {
+        "experts": 384,
+        "layers": 40,
+        "placement": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+        "rank": 1,
+        "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+        "valid_permutation": true
+      },
+      {
+        "experts": 384,
+        "layers": 40,
+        "placement": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+        "rank": 2,
+        "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+        "valid_permutation": true
+      },
+      {
+        "experts": 384,
+        "layers": 40,
+        "placement": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+        "rank": 3,
+        "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+        "valid_permutation": true
+      }
+    ],
+    "same_file": true,
+    "same_hash": true,
+    "valid_permutation": true,
+    "world_size": 4
+  }
+}

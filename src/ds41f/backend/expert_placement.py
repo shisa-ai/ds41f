@@ -200,7 +200,10 @@ def fingerprint(path: str) -> dict:
         return info
     n2o = n2o.long()
     info["layers"], info["experts"] = int(n2o.shape[0]), int(n2o.shape[1])
-    want = torch.arange(n2o.shape[1])
+    # device=n2o.device, not the default device: the serving loader sets the default
+    # device to CUDA, and this tensor is loaded to CPU, so a default-device arange
+    # makes the comparison raise instead of validating.
+    want = torch.arange(n2o.shape[1], device=n2o.device)
     invalid = [
         layer
         for layer in range(n2o.shape[0])
