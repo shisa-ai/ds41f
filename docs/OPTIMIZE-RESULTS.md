@@ -185,6 +185,27 @@ carries the module as `ds41f.backend.expert_placement` with an opt-in
 layer), so every rank must call it together; the engine's single-controller
 topology is why the backend's flag is opt-in rather than default.
 
+A file beside the module does not by itself enable placement in serving, and
+reporting "applied" is not evidence that it was. `serve/verify_placement_dispatch.py`
+loads the model through the real serving loader on all four ranks with
+`audit=True`, which makes `apply()` check its own work on the model's real
+tensors, and records the outcome (`results/placement-dispatch-verify.json`):
+
+- all four ranks resolved the same file and the same sha256
+  (`e8cab35b…`);
+- the loader applied it on every rank;
+- each gate is the pre-permutation gate reordered by the calibration's
+  `new_to_old`;
+- every local expert slot holds the bytes of the expert `exchange_plan` assigned
+to it, checked against hashes gathered from the source rank;
+- each rank's local expert ids match an independent recomputation from the
+  placement file, and each layer's ids across the four ranks are a permutation of
+  all 384 experts.
+
+The calibration is pinned by hash: `DSV41F_EXPERT_PLACEMENT_SHA256` makes a run
+fail loudly if a different file is used (`check_expected_hash`), and the manifest
+records the sha256 of the calibration a run actually used.
+
 ### Fused `hc_mixes` (implemented, off by default)
 
 `hc_mixes` computed `rsqrt(mean(x^2)+eps) * (x @ hc_fn)` in five steps over a
@@ -394,14 +415,21 @@ therefore invisible to this gate. For those, the evidence is:
   reference expression at bf16 output.
 - `check_placement.py`: placement moves logits by at most 0.71 against a
   same-configuration spread of 0.85, with an identical sampled token.
+- `verify_placement_dispatch.py`: the serving loader applies one pinned placement
+  on all four ranks, and the resulting gate/expert mapping checks out on the
+  model's real tensors (see [Load-balanced expert
+  placement](#load-balanced-expert-placement)).
 - `check_hc_mixes.py` and `check_prefill_parity.py`: the deviation of a candidate
   change against the same-configuration noise floor.
+- `check_fixed_order_prefill.py`: the atomic prefill reduction is the sole source
+  of the prefill nondeterminism, and the fixed-order path removes it
+  bit-exactly at 2048 and 8192 (see [Noise floor](#noise-floor)).
 
 What none of that establishes: independent prefill-state equivalence (the whole
-prompt, not one position), exact expert-routing agreement, or quality on
-representative natural-generation prompts. Random-token prompts are not a quality
-test, and no held-out task evaluation was run. Those are the missing evidence the
-correctness gates in OPTIMIZE.md ask for.
+prompt, not one position), exact expert-routing agreement **for the shipped
+atomic path**, or quality on representative natural-generation prompts.
+Random-token prompts are not a quality test, and no held-out task evaluation was
+run. Those are the missing evidence the correctness gates in OPTIMIZE.md ask for.
 
 ## Engram lookup cost
 
@@ -587,8 +615,15 @@ DSV41F_HC_MIXES_FUSED=1 $PY --nproc-per-node 4 benchmark_ds41f.py --prompt-lens 
 $PY --nproc-per-node 4 check_placement.py --placement expert_placement.pt
 $PY --nproc-per-node 4 check_hc_mixes.py --length 2048
 $PY --nproc-per-node 4 check_hc_mixes.py --length 8192
-$PY --nproc-per-node 4 check_prefill_parity.py --length 2048
+$PY --nproc-per-node 4 check_prefill_parity.py --length 2048 --reps 3
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
+
+# prefill determinism and the cost of removing it (writes results/fixed-order-prefill-*.json)
+$PY --nproc-per-node 4 check_fixed_order_prefill.py --length 2048 --reps 2 --timed 5
+$PY --nproc-per-node 4 check_fixed_order_prefill.py --length 8192 --reps 2 --timed 3
+
+# serving dispatch of the pinned placement, on every rank
+cd ../serve && $PY --nproc-per-node 4 verify_placement_dispatch.py --ckpt /data/ds41f/DSV41F-TP4 && cd ../inference
 
 # component profiles
 $PY --nproc-per-node 4 profile_prefill.py
