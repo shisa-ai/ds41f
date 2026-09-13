@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -68,11 +69,35 @@ def sha256_file(path: str | os.PathLike, limit: int | None = None) -> str:
     return h.hexdigest()
 
 
+def _safetensors_header_len(path: str | os.PathLike) -> int | None:
+    """Total bytes of a safetensors header: the 8-byte size prefix plus the JSON index.
+
+    Returns None when the file is not a plausible safetensors shard, so callers fall
+    back to a fixed prefix. The header is the tensor index, so hashing all of it
+    identifies the tensor layout. A fixed 1 MiB prefix does not: the shipped rank-0
+    shard's header is 2,839,800 bytes, so a 1 MiB hash covers only part of the index.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            raw = fh.read(8)
+    except OSError:
+        return None
+    if len(raw) != 8:
+        return None
+    n = struct.unpack("<Q", raw)[0]
+    if n <= 0 or 8 + n > size:
+        return None
+    return 8 + n
+
+
 def file_identity(path: str | os.PathLike, header_bytes: int = 1 << 20, full_hash: bool = False) -> dict:
     """Identity of one file: size, mtime, and a header hash (or the full hash).
 
-    For a safetensors shard the header hash covers the tensor index plus the start
-    of the payload, which distinguishes checkpoints without reading the whole file.
+    For a ``.safetensors`` shard the header hash covers the entire tensor index
+    (8-byte length prefix plus the JSON header), which identifies the checkpoint's
+    tensor layout without reading the payload. Other files hash their first
+    ``header_bytes`` bytes. ``sha256_scope`` records which of these was used.
     """
     p = Path(path)
     st = p.stat()
@@ -84,6 +109,11 @@ def file_identity(path: str | os.PathLike, header_bytes: int = 1 << 20, full_has
     if full_hash:
         info["sha256"] = sha256_file(p)
         info["sha256_scope"] = "full"
+        return info
+    st_header = _safetensors_header_len(p) if p.suffix == ".safetensors" else None
+    if st_header is not None:
+        info["sha256"] = sha256_file(p, limit=st_header)
+        info["sha256_scope"] = f"safetensors_header_{st_header}_bytes"
     else:
         info["sha256"] = sha256_file(p, limit=header_bytes)
         info["sha256_scope"] = f"first_{header_bytes}_bytes"

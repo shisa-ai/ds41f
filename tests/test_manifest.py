@@ -8,6 +8,7 @@ own provenance instead of relying on "the file next to the module".
 import hashlib
 import json
 import shutil
+import struct
 import subprocess
 
 import pytest
@@ -39,6 +40,27 @@ def test_file_identity_header_scope_is_not_the_full_hash(tmp_path):
     assert full["sha256_scope"] == "full"
     assert header["bytes"] == full["bytes"] == (1 << 20) + 4096
     assert header["sha256"] != full["sha256"]
+
+
+def test_file_identity_hashes_the_whole_safetensors_header(tmp_path):
+    # A safetensors header is the 8-byte little-endian length prefix plus the JSON
+    # tensor index. The shipped rank-0 shard's index is 2,839,800 bytes, larger than
+    # a fixed 1 MiB prefix, so the hash must cover the parsed header length instead.
+    index = json.dumps({"__metadata__": {"format": "pt"}}).encode()
+    payload = b"\x00" * 64
+    p = tmp_path / "model0-mp4.safetensors"
+    p.write_bytes(struct.pack("<Q", len(index)) + index + payload)
+    info = manifest.file_identity(p)
+    assert info["sha256_scope"] == f"safetensors_header_{8 + len(index)}_bytes"
+    assert info["sha256"] == hashlib.sha256(struct.pack("<Q", len(index)) + index).hexdigest()
+
+
+def test_file_identity_falls_back_for_a_non_safetensors_payload(tmp_path):
+    # A .safetensors name with an implausible length prefix must not be trusted.
+    p = tmp_path / "model0-mp4.safetensors"
+    p.write_bytes(b"header" + b"0" * 2048)
+    info = manifest.file_identity(p)
+    assert info["sha256_scope"] == "first_1048576_bytes"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
