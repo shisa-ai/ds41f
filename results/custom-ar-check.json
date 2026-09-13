@@ -1,0 +1,109 @@
+{
+ "mode": "parity",
+ "prompt_len": 512,
+ "rows": [
+  {
+   "batch": 1,
+   "decode_steps": 4,
+   "ar_check": {
+    "shapes_seen": [
+     [
+      [
+       1,
+       1,
+       24,
+       256
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       1,
+       5120
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       1,
+       5120
+      ],
+      "float32"
+     ],
+     [
+      [
+       1,
+       512,
+       24,
+       256
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       512,
+       256
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       512,
+       512
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       512,
+       5120
+      ],
+      "bfloat16"
+     ],
+     [
+      [
+       1,
+       5120
+      ],
+      "float32"
+     ]
+    ],
+    "max_abs_diff": {
+     "eager": 0.03125,
+     "captured": 1.9073486328125e-06
+    },
+    "calls_with_nonfinite_input": {
+     "eager": 0,
+     "captured": 0
+    }
+   },
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    15,
+    553,
+    15,
+    2181
+   ],
+   "eager_tokens": [
+    15,
+    553,
+    15,
+    2181
+   ]
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+{
+  "stage": "capture",
+  "expandable_segments": true,
+  "rank": 0,
+  "construct_error": "ModuleNotFoundError(\"No module named 'vllm'\")"
+}

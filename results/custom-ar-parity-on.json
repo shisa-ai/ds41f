@@ -1,0 +1,108 @@
+{
+ "mode": "parity",
+ "prompt_len": 512,
+ "rows": [
+  {
+   "batch": 1,
+   "decode_steps": 16,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    15,
+    553,
+    15,
+    2181,
+    201,
+    32,
+    223,
+    128547
+   ],
+   "eager_tokens": [
+    15,
+    553,
+    15,
+    2181,
+    201,
+    32,
+    223,
+    128547
+   ]
+  },
+  {
+   "batch": 2,
+   "decode_steps": 16,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    15,
+    790,
+    553,
+    342,
+    15,
+    4800,
+    2181,
+    8233
+   ],
+   "eager_tokens": [
+    15,
+    790,
+    553,
+    342,
+    15,
+    4800,
+    2181,
+    8233
+   ]
+  },
+  {
+   "batch": 4,
+   "decode_steps": 16,
+   "graphed_vs_eager": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "eager_vs_eager_noise_floor": {
+    "token_steps_differing": 0,
+    "first_differing_step": null,
+    "max_logit_diff": 0.0
+   },
+   "graphed_tokens": [
+    15,
+    8709,
+    201,
+    301,
+    553,
+    9313,
+    24603,
+    223
+   ],
+   "eager_tokens": [
+    15,
+    8709,
+    201,
+    301,
+    553,
+    9313,
+    24603,
+    223
+   ]
+  }
+ ]
+}

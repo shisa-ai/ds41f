@@ -123,3 +123,77 @@ def test_sole_driver_single_backend_thread():
         assert recorded and all(n == "ds41f-engine" for n in recorded)
     finally:
         eng.shutdown()
+
+
+# ------------------------------------------------ admission window (section 4)
+
+class _RecordingBackend(FakeBackend):
+    """FakeBackend that records the row count of every prefill plan it executes."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.prefill_cohort_sizes = []
+
+    def execute(self, plan, state):
+        if plan.op == "prefill":
+            self.prefill_cohort_sizes.append(len(plan.rows))
+        return super().execute(plan, state)
+
+
+def test_admission_window_off_admits_a_single_arrival():
+    fake = _RecordingBackend()
+    with run_engine(backend=fake) as eng:
+        h = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=2))
+        h.result(timeout=10)
+    assert fake.prefill_cohort_sizes[0] == 1
+
+
+def test_admission_window_holds_a_cohort_open_for_late_arrivals(monkeypatch):
+    """Four requests a millisecond apart must share one prefill cohort.
+
+    Without the window the engine admits whatever the queue holds when it looks, so
+    these arrive as a cohort of one or two and the rest wait a whole generation. That
+    is what the concurrency-4 trace showed: cohorts of 3, 2, 2, 1 and 3, and a
+    straggler at 3.1-7.4 s TTFT.
+    """
+    # Control arm first: the same submission pattern with the window off, so the
+    # assertion below is read against a measured baseline rather than an assumption.
+    fake_off = _RecordingBackend()
+    with run_engine(backend=fake_off) as eng:
+        off = []
+        for _ in range(4):
+            off.append(eng.submit([1, 2, 3, 4], SamplingParams(max_new_tokens=2)))
+            time.sleep(0.001)
+        for h in off:
+            h.result(timeout=30)
+    assert fake_off.prefill_cohort_sizes == [1, 1, 1, 1], fake_off.prefill_cohort_sizes
+
+    monkeypatch.setenv("DS41F_ADMIT_WINDOW_MS", "60")
+    fake = _RecordingBackend()
+    # Equal-length prompts on purpose: length bucketing splits a cohort by prompt
+    # length before the backend sees it, so mixed lengths would hide the window
+    # behind that filter. Equal lengths are also the case the concurrency trace
+    # measured -- four identical requests, cohorts of 3, 2, 2, 1 and 3.
+    with run_engine(backend=fake) as eng:
+        handles = []
+        for _ in range(4):
+            handles.append(eng.submit([1, 2, 3, 4], SamplingParams(max_new_tokens=2)))
+            time.sleep(0.001)
+        for h in handles:
+            h.result(timeout=30)
+    assert fake.prefill_cohort_sizes[0] == 4, fake.prefill_cohort_sizes
+
+
+def test_admission_window_delays_a_lone_arrival_by_at_most_the_window(monkeypatch):
+    monkeypatch.setenv("DS41F_ADMIT_WINDOW_MS", "60")
+    fake = _RecordingBackend()
+    with run_engine(backend=fake) as eng:
+        t0 = time.perf_counter()
+        h = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=2))
+        h.result(timeout=10)
+        elapsed = time.perf_counter() - t0
+    # it waited for the window rather than admitting at once ...
+    assert fake.prefill_cohort_sizes[0] == 1
+    assert elapsed >= 0.04, elapsed
+    # ... and the wait is bounded, not open-ended
+    assert elapsed < 2.0, elapsed

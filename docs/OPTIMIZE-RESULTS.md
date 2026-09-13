@@ -35,7 +35,7 @@ Remaining work and follow-up status:
 | Marlin / FP4-expert kernel comparison | **Measured: 2.8× faster than the engine's grouped GEMV, graphed, at the real per-rank mix.** Not integrated; the two differ in activation precision (W4A16 vs the engine's W4A8), so a switch needs its own correctness gate. See [FP4 expert MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels). |
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | **Measured and fixed.** The step graphs and their buffers are keyed by batch size (`DSV41F_SG_BATCH_MAX`, default 8) and the batched MoE no longer takes the prefill tile path below 8 rows. Batches of 2, 4 and 8 cost 50.4, 61.3 and 82.3 ms/step against 158.5-159.8 before, and the graphed and eager paths are bit-identical at every size. See [Batched decode](#batched-decode). |
-| Cohort admission | Missing. A cohort is whatever is in the wait queue when the engine asks for one, so a request that arrives a moment late waits for a full generation. The three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and never admitted all four together; the stragglers saw 3.1-7.4 s TTFT. An admission window is the obvious fix and has not been measured. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
+| Cohort admission | **Implemented and measured, off by default.** A cohort is whatever is in the wait queue when the engine asks, so a request that arrives a moment late waits for a full generation: the three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and the stragglers saw 3.1-7.4 s TTFT. `DS41F_ADMIT_WINDOW_MS=8` holds an under-filled cohort open for 8 ms and fixes it: 40.80 -> 52.42 tok/s aggregate and 3702 -> 226 ms worst TTFT at concurrency 4, for a bounded delay paid only when the engine is idle. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
@@ -130,12 +130,40 @@ latency matched concurrency 1 exactly: it was concurrency 1, twice. The 3.1-3.5 
 TTFT is the second request waiting for the first cohort's full 128-token
 generation, which is `128 x 28.5 ms = 3.65 s`.
 
-**The scheduler has no admission window.** A cohort is whatever is in the wait
-queue at the instant the engine asks. Across the three concurrency-4 runs the
-trace shows cohorts of 3, 2, 2, 1 and 3 rows: no run admitted all four requests
-together, and the requests left out ran alone and waited a full generation. Those
-stragglers are the 3.1-7.4 s TTFT. This is the same mechanism as the concurrency-2
-case and it is now measured rather than inferred.
+**The scheduler has no admission window, and adding one is measured.** A cohort is
+whatever is in the wait queue at the instant the engine asks. Across the three
+concurrency-4 runs the trace shows cohorts of 3, 2, 2, 1 and 3 rows: no run
+admitted all four requests together, and the requests left out ran alone and
+waited a full generation. Those stragglers are the 3.1-7.4 s TTFT. This is the
+same mechanism as the concurrency-2 case and it is now measured rather than
+inferred.
+
+`DS41F_ADMIT_WINDOW_MS` holds a fresh, under-filled cohort open for a bounded
+window after its first arrival, so requests sent together land in one batch. It
+waits only when the engine has no active cohort and the queue is shorter than the
+batch capacity, so a running batch is never slowed, and the wait happens before
+any row is allocated. Three repeats of 4 x 128 tokens at concurrency 4:
+
+| Window | Aggregate | Worst TTFT | c=1 TTFT | c=1 ITL | c=4 decode cohorts |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 0 ms (default) | 40.80 tok/s | 3702.8 ms | 181 ms | 28.78 ms | 1 row x248, 3 x254, 4 x115 |
+| 8 ms | 52.42 tok/s | 226.3 ms | 196.8 ms | 28.77 ms | 1 row x341, 4 x358 |
+| 20 ms | 51.52 tok/s | 227.0 ms | 207.9 ms | 28.67 ms | 1 row x376, 4 x377 |
+| 60 ms | 50.93 tok/s | 228.2 ms | 246.9 ms | 28.73 ms | 1 row x360, 4 x381 |
+
+8 ms is the knee: the cohorts fill, and past it the aggregate stops improving
+while the idle-time delay grows linearly. The cost is bounded by the window and is
+paid only when the engine would otherwise run an under-filled cohort; at c=1 that
+is every request, so the measured TTFT moves 181 -> 197 ms, which is the window
+plus the 179-201 ms spread the baseline itself shows across runs. Decode is
+untouched at every setting (ITL 28.67-28.78 ms at c=1).
+
+At concurrency 2 the window is throughput-neutral and a fairness win: aggregate
+32.69 tok/s against 33.04, worst TTFT 202 ms against 3120 ms, but per-request ITL
+55.52 ms against 28.60 ms. The old 28.60 ms was two serialized generations, so one
+request waited the other out; the new number is both requests sharing one batched
+step of the same total length. The default is 0, so every number elsewhere in this
+document still describes the shipped configuration.
 
 **The batched step was slow for two separate reasons, both now fixed.** See
 [Batched decode](#batched-decode) for the measurements. Before the fixes a batch
@@ -235,10 +263,14 @@ for them.
 ### What is still open
 
 A cohort is whatever is in the wait queue at the instant the engine asks for one.
-There is no admission window, so at concurrency 4 every measured run formed a
-cohort of three and left the fourth request to wait for a full generation. Adding a
-short admission delay is the obvious next change, but it trades TTFT for a
-predictable cohort size and no version of it has been measured.
+`DS41F_ADMIT_WINDOW_MS` closes most of that: at 8 ms, three concurrency-4 repeats
+admitted all four rows every time, aggregate went 40.80 -> 52.42 tok/s and worst
+TTFT 3702 -> 226 ms, at the cost of the window itself when the engine is idle. It
+defaults to 0, so the numbers in this document are the unwindowed ones; see
+[Concurrency](#concurrency-what-the-scheduler-actually-executed) for the curve.
+What it does not fix is a request that arrives *after* a cohort has started: that
+one still waits for the cohort to drain, which is the mid-flight refill milestone
+in `docs/OPTIMIZE.md` section 4.
 
 Above the threshold `routed_batch` is still the right path, but where the
 crossover sits is not settled. The isolated MoE benchmark in

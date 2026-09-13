@@ -1,0 +1,74 @@
+[
+  {
+    "rep": 0,
+    "prompt": 0,
+    "tokens": 64,
+    "sha256": "9096303f0b6b079d"
+  },
+  {
+    "rep": 0,
+    "prompt": 1,
+    "tokens": 20,
+    "sha256": "22b6fda3c97f2460"
+  },
+  {
+    "rep": 0,
+    "prompt": 2,
+    "tokens": 64,
+    "sha256": "25504fe5c9e28f5a"
+  },
+  {
+    "rep": 0,
+    "prompt": 3,
+    "tokens": 64,
+    "sha256": "40f8a5276deb6b32"
+  },
+  {
+    "rep": 0,
+    "prompt": 4,
+    "tokens": 64,
+    "sha256": "bc577252508002d8"
+  },
+  {
+    "rep": 0,
+    "prompt": 5,
+    "tokens": 23,
+    "sha256": "2a7cf04c64c913d8"
+  },
+  {
+    "rep": 1,
+    "prompt": 0,
+    "tokens": 64,
+    "sha256": "026979d7c1659cbc"
+  },
+  {
+    "rep": 1,
+    "prompt": 1,
+    "tokens": 20,
+    "sha256": "8a9a2e3b758935a3"
+  },
+  {
+    "rep": 1,
+    "prompt": 2,
+    "tokens": 64,
+    "sha256": "2529769e2ee21003"
+  },
+  {
+    "rep": 1,
+    "prompt": 3,
+    "tokens": 64,
+    "sha256": "410a165860a4d651"
+  },
+  {
+    "rep": 1,
+    "prompt": 4,
+    "tokens": 64,
+    "sha256": "39f080b33a049315"
+  },
+  {
+    "rep": 1,
+    "prompt": 5,
+    "tokens": 23,
+    "sha256": "2a7cf04c64c913d8"
+  }
+]

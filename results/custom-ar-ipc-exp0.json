@@ -1,0 +1,13 @@
+{
+  "stage": "capture",
+  "expandable_segments": false,
+  "rank": 0,
+  "backend": "custom_allreduce+symm_mem",
+  "disabled": false,
+  "eager_ok": true,
+  "capture_and_register_s": 0.11,
+  "capture_ok": true,
+  "graph_buffer_count": null,
+  "replay_max_abs_diff": 0.0,
+  "replay_ok": true
+}

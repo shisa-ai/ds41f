@@ -8,7 +8,9 @@ API layers never touch the backend directly.
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 from queue import Empty, Queue
 from typing import Optional, Sequence
 
@@ -43,6 +45,25 @@ class LLMEngine:
         self._active: dict[int, _Request] = {}
         self._control: Queue = Queue()
         self._wakeup = threading.Event()
+        # Admission window. A cohort is whatever is in the wait queue when the engine
+        # asks, so four simultaneous requests can be admitted as cohorts of 3 and 1 and
+        # the straggler waits a whole generation (3.1-7.4 s TTFT at concurrency 4, with
+        # no run admitting all four). Holding the cohort open for a bounded window after
+        # the first arrival lets the rest land in the same batch. The wait happens only
+        # at a cohort boundary and only while the cohort is under capacity, so it cannot
+        # slow a running batch down; it trades a bounded start delay for a full
+        # generation of a straggler's time. 0 keeps the old behaviour, and 0 is the
+        # default because a lone request pays the whole window.
+        #
+        # Measured, 3 repeats of 4 x 128 tokens at concurrency 4 (docs/OPTIMIZE-RESULTS.md):
+        #   0 ms  40.80 tok/s, worst TTFT 3702.8 ms, c=4 decode cohorts 1x248 3x254 4x115
+        #   8 ms  52.42 tok/s, worst TTFT  226.3 ms, c=4 decode cohorts 1x341 4x358
+        #  20 ms  51.52 tok/s, worst TTFT  227.0 ms
+        #  60 ms  50.93 tok/s, worst TTFT  228.2 ms
+        # 8 ms is the knee; past it the aggregate stops improving and the idle-time
+        # delay grows linearly. Decode is untouched at every setting (c=1 ITL 28.67-28.78 ms).
+        self._admit_window_s = float(os.environ.get("DS41F_ADMIT_WINDOW_MS", "0")) / 1000.0
+        self._admit_deadline: Optional[float] = None
         self._thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
         # on_drain(cohort_requests) fires after a cohort fully drains and before the
@@ -117,6 +138,25 @@ class LLMEngine:
             self._drain_control()
             if self._stopped.is_set():
                 break
+            # Hold a fresh, under-filled cohort open for the admission window. Waiting
+            # here rather than inside the scheduler keeps `_admit` free of policy and
+            # keeps the wait before any row is allocated, so there is nothing to undo.
+            if (
+                self._admit_window_s > 0
+                and not self._active
+                and self._waiting
+                and len(self._waiting) < self.config.max_active_sequences
+            ):
+                now = time.monotonic()
+                if self._admit_deadline is None:
+                    self._admit_deadline = now + self._admit_window_s
+                remaining = self._admit_deadline - now
+                if remaining > 0:
+                    self._wakeup.clear()
+                    self._wakeup.wait(timeout=remaining)
+                    continue
+            else:
+                self._admit_deadline = None
             plan = self.scheduler.next_plan(self._waiting, self._active)
             # eager drain capture, two paths:
             # (a) the scheduler drained the cohort while admitting a new one (its

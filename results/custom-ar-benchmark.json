@@ -1,0 +1,313 @@
+{
+  "status": "failed",
+  "world_size": 4,
+  "decode_steps": 32,
+  "rows": [
+    {
+      "length": 512,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 3.430901336017996,
+      "prefill_tok_s": 149.2319218349316,
+      "decode_ms": 210.22799926868174,
+      "decode_tok_s": 4.756740317553756
+    },
+    {
+      "length": 512,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 0.3776418699417263,
+      "prefill_tok_s": 1355.7818683585228,
+      "decode_ms": 28.534968150779605,
+      "decode_tok_s": 35.04472108452937
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 0.3902762390207499,
+      "prefill_tok_s": 1311.8912934199368,
+      "decode_ms": 26.85190968622919,
+      "decode_tok_s": 37.24129909884371
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 3.432203163160011,
+      "prefill_tok_s": 149.17531849385173,
+      "decode_ms": 209.82337401073892,
+      "decode_tok_s": 4.765913257828078
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 4.9924915849696845,
+      "prefill_tok_s": 410.216014417666,
+      "decode_ms": 208.90679434523918,
+      "decode_tok_s": 4.786823727462885
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 0.8017290020361543,
+      "prefill_tok_s": 2554.479125488396,
+      "decode_ms": 26.945724617689848,
+      "decode_tok_s": 37.1116388290965
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 0.8215724299661815,
+      "prefill_tok_s": 2492.780825281956,
+      "decode_ms": 26.935739399050362,
+      "decode_tok_s": 37.12539630656123
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 4.990161604946479,
+      "prefill_tok_s": 410.4075503226043,
+      "decode_ms": 208.19435716839507,
+      "decode_tok_s": 4.8032041482813295
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 8.18093497888185,
+      "prefill_tok_s": 1001.3525374723931,
+      "decode_ms": 209.85388413828332,
+      "decode_tok_s": 4.76522035370596
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 2.429097036132589,
+      "prefill_tok_s": 3372.4465832960864,
+      "decode_ms": 26.58436747151427,
+      "decode_tok_s": 37.61609152715489
+    }
+  ],
+  "decode_state": "same GPU-buffer snapshot per comparison; cold prefill timed independently",
+  "source_sha256": {
+    "model.py": "96cca7631a7a97ffd1e47ed1637c9a7788f0c35280e922faa11b7e34c73e4b9d",
+    "grouped_moe.py": "2ffa733e32d98269663e2e640371aa220e3f8603a57412e99baaf34844387dd5",
+    "kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+    "kernel.py": "4ae00dd885ad052989cbbc42384f0decdfa1ba94cd00e34d274e689f5fdaa532",
+    "benchmark_ds41f.py": "c0140f1566253d97ec5c2f6e3992426e717290a2f790a8ecfbbbad63efe82960"
+  },
+  "manifest": {
+    "created_at": "2026-09-14T03:39:34+0800",
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "DSV41F_CUSTOM_AR": "1",
+      "DSV41F_ENGRAM_OFFLOAD": "1",
+      "OMP_NUM_THREADS": "1"
+    },
+    "runtime": {
+      "python": "3.12.14",
+      "torch": "2.14.0+cu130",
+      "triton": "3.8.0",
+      "tilelang": "0.1.8",
+      "cuda": "13.0",
+      "device_count": 4,
+      "device_names": [
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e"
+      ],
+      "nccl": "2.30.7"
+    },
+    "sources": {
+      "model.py": "96cca7631a7a97ffd1e47ed1637c9a7788f0c35280e922faa11b7e34c73e4b9d",
+      "grouped_moe.py": "2ffa733e32d98269663e2e640371aa220e3f8603a57412e99baaf34844387dd5",
+      "kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+      "kernel.py": "4ae00dd885ad052989cbbc42384f0decdfa1ba94cd00e34d274e689f5fdaa532",
+      "benchmark_ds41f.py": "c0140f1566253d97ec5c2f6e3992426e717290a2f790a8ecfbbbad63efe82960"
+    },
+    "engine_repo": {
+      "path": "/root/ds41f",
+      "available": true,
+      "revision": "4154f0013fd3692eb7b0cdd2536b51b00e3c0c44",
+      "branch": "main",
+      "dirty": true,
+      "dirty_paths": [
+        "M docs/OPTIMIZE-RESULTS.md",
+        "?? results/custom-ar-check.json",
+        "?? results/custom-ar-ipc-exp0.json",
+        "?? results/custom-ar-ipc-exp1.json",
+        "?? results/custom-ar-parity-nccl.json",
+        "?? results/custom-ar-parity-off.json",
+        "?? results/custom-ar-parity-on.json",
+        "?? results/logits-custom/",
+        "?? results/logits-nccl/"
+      ]
+    },
+    "model_repo": {
+      "path": "/root/glm-testing",
+      "available": true,
+      "revision": "d3ce386c95bd864af96aa4c75001029008ae2833",
+      "branch": "main",
+      "dirty": true,
+      "dirty_paths": [
+        "M ds41f/inference/bench_batch_decode.py",
+        " M ds41f/inference/benchmark_ds41f.py",
+        " M ds41f/inference/model.py",
+        " M ds41f/serve/server.py",
+        "?? ds41f/inference/check_custom_ar_ipc.py",
+        "?? ds41f/inference/custom_ar.py",
+        "?? ds41f/serve/check_custom_ar_parity.py"
+      ]
+    },
+    "config": {
+      "path": "/root/glm-testing/ds41f/inference/config.json",
+      "bytes": 1982,
+      "mtime": 1789024904.0792656,
+      "sha256": "2e84f45cf1dac8c7fcbb200e96667d4b913275690668ed496f24c7747207a809",
+      "sha256_scope": "full"
+    },
+    "checkpoint": {
+      "path": "/data/ds41f/DSV41F-TP4",
+      "files": {
+        "model0-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model0-mp4.safetensors",
+          "bytes": 130673094032,
+          "mtime": 1789028806.128312,
+          "sha256": "8e4ca03d9bfeecd9ad096b66e87e5ef769523a2650b26b0c3624f231b7b49e39",
+          "sha256_scope": "safetensors_header_2839808_bytes"
+        },
+        "model1-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model1-mp4.safetensors",
+          "bytes": 130673118696,
+          "mtime": 1789028876.5222774,
+          "sha256": "2cb4aef9cbd53b543e7e7bc7497620435dfd9a9adf9abda5247c56a14ad77659",
+          "sha256_scope": "safetensors_header_2864472_bytes"
+        },
+        "model2-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model2-mp4.safetensors",
+          "bytes": 130673119656,
+          "mtime": 1789028953.1982393,
+          "sha256": "8f83da505f553a08b8db3bb873aa1a5d57839b0b16e04f5f9ff9d87e92ba5ed0",
+          "sha256_scope": "safetensors_header_2865432_bytes"
+        },
+        "model3-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model3-mp4.safetensors",
+          "bytes": 130673120160,
+          "mtime": 1789029027.7612016,
+          "sha256": "d7110b9c1040ec15a5c051e23ef998f1fd38e92f7ef1e2ad51c8e3b901b07096",
+          "sha256_scope": "safetensors_header_2865936_bytes"
+        },
+        "tokenizer.json": {
+          "path": "/data/ds41f/DSV41F-TP4/tokenizer.json",
+          "bytes": 6367257,
+          "mtime": 1789029027.7782016,
+          "sha256": "462d744d52ec66501066d2fadcd5e25e2706dcae6518d7c45b1c54f785016be0",
+          "sha256_scope": "first_1048576_bytes"
+        },
+        "tokenizer_config.json": {
+          "path": "/data/ds41f/DSV41F-TP4/tokenizer_config.json",
+          "bytes": 801,
+          "mtime": 1789029027.7792015,
+          "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+          "sha256_scope": "first_1048576_bytes"
+        }
+      }
+    },
+    "placement": {
+      "path": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+      "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+      "bytes": 248567,
+      "keys": [
+        "balanced_max_over_ideal",
+        "current_max_over_ideal",
+        "loads",
+        "new_to_old"
+      ],
+      "layers": 40,
+      "experts": 384,
+      "valid_permutation": true,
+      "invalid_layers": []
+    }
+  },
+  "parity": [
+    {
+      "length": 512,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 12.321478843688965,
+      "prefill_top1_agreement_full": 0.82421875,
+      "prefill_max_logit_diff": 0.61594557762146,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 12.321478843688965,
+      "prefill_top1_agreement_full": 0.826171875,
+      "prefill_max_logit_diff": 0.4649151563644409,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 16.11829376220703,
+      "prefill_top1_agreement_full": 0.82177734375,
+      "prefill_max_logit_diff": 0.6908674240112305,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 16.11829376220703,
+      "prefill_top1_agreement_full": 0.79931640625,
+      "prefill_max_logit_diff": 0.6396455764770508,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 15.691231727600098,
+      "prefill_top1_agreement_full": 0.758544921875,
+      "prefill_max_logit_diff": 1.5131564140319824,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ],
+  "failed_check": {
+    "length": 8192,
+    "repeat": 0,
+    "top1_agreement": 1.0,
+    "prefill_top1_agreement": 1.0,
+    "prefill_max_logit_diff_full": 15.691231727600098,
+    "prefill_top1_agreement_full": 0.758544921875,
+    "prefill_max_logit_diff": 1.5131564140319824,
+    "max_logit_diff": 0.0,
+    "mean_kl": 0.0,
+    "max_kl": 0.0
+  }
+}
