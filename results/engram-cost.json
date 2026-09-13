@@ -1,13 +1,13 @@
 {
   "prompt_len": 2048,
   "steps": 20,
-  "decode_ms_baseline": 32.33078704215586,
-  "decode_ms_instrumented": 32.382542034611106,
+  "decode_ms_baseline": 27.095790021121502,
+  "decode_ms_instrumented": 27.348652598448098,
   "engram_calls_per_step": 2.0,
-  "engram_ms_per_step": 0.45198644511401653,
-  "engram_pct_of_step": 1.3980063167799626,
-  "engram_ms_per_call": 0.22599322255700827,
-  "instrumentation_overhead_ms": 0.051754992455244064,
+  "engram_ms_per_step": 0.44094258919358253,
+  "engram_pct_of_step": 1.627347233093637,
+  "engram_ms_per_call": 0.22047129459679127,
+  "instrumentation_overhead_ms": 0.2528625773265958,
   "offloaded_tables": 2,
   "total_tables": 2
 }

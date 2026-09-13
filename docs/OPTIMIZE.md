@@ -524,6 +524,19 @@ and concurrent prefill/decode, plus pinned RAM and VRAM. The old ~2% offload pen
 at 270 ms/token is not a current estimate. Move this earlier if profiling exposes
 substantial offload stalls.
 
+**Status (September 14).** The exposed cost is measured, and it is 0.441 ms/step
+(1.63%) for the two lookups -- not substantial enough to move this section earlier,
+which answers the question this section poses. Splitting the call into its pieces
+(`probe_engram_steps.py`) shows it is 33 us of D2H, 70 us of CPU gather and 62 us of
+H2D over a 12 KiB payload: transfer latency and a scattered read of a 23 GiB pinned
+table, not the dispatch count of the chain. The two fp8 decodes are now 256-entry
+numpy tables, which is exact and worth 0.35-0.59% at identical tokens. The rest is
+not taken: both lookups precede all dependent GPU work and the D2H is synchronous,
+so reordering only moves the exposure; hiding it needs the gather on a worker thread
+or on the GPU, and the GPU-resident tables are the reason the offload path exists
+(45.8 GiB per rank against ~50 GiB of headroom). See
+[Engram lookup cost](OPTIMIZE-RESULTS.md#engram-lookup-cost).
+
 ## 7. Improve remaining MoE dispatch/layout bottlenecks
 
 Only after the production-kernel comparison, optimize remaining expensive work.

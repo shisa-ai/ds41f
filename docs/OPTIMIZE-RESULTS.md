@@ -37,7 +37,7 @@ Remaining work and follow-up status:
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | **Measured and fixed.** The step graphs and their buffers are keyed by batch size (`DSV41F_SG_BATCH_MAX`, default 8) and the batched MoE no longer takes the prefill tile path below 8 rows. Batches of 2, 4 and 8 cost 50.4, 61.3 and 82.3 ms/step against 158.5-159.8 before, and the graphed and eager paths are bit-identical at every size. See [Batched decode](#batched-decode). |
 | Cohort admission | **Implemented and measured, off by default.** A cohort is whatever is in the wait queue when the engine asks, so a request that arrives a moment late waits for a full generation: the three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and the stragglers saw 3.1-7.4 s TTFT. `DS41F_ADMIT_WINDOW_MS=8` holds an under-filled cohort open for 8 ms and fixes it: 40.80 -> 52.42 tok/s aggregate and 3702 -> 226 ms worst TTFT at concurrency 4, for a bounded delay paid only when the engine is idle. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
-| Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
+| Engram lookup cost | **Measured and partly recovered.** 0.441 ms/step, 1.63% of decode, for two lookups. Splitting the call shows it is 33 us of D2H, 70 us of CPU gather and 62 us of H2D, so it is transfer latency and a scattered read of a 23 GiB table, not dispatch count. The fp8 decodes are now numpy tables, which is exact and worth 0.35-0.59%; the remaining ~0.28 ms/step needs a worker thread or a GPU-side gather, and is not taken. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion, in a single-process model loop. Pipelining the token read was implemented and measured: it recovers none of it, because the served path's per-step barrier is the blocking NCCL broadcast inside `BroadcastModel.forward`, not the read (median 28.80 ms in `enqueue`, 0.019 ms in `resolve`). See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | Decode rotary embedding | **Fused, 2.3% lower decode latency at identical tokens.** The largest single unfused item in the step's op attribution (0.68 ms/step of `copy_` and `mul`), called 198 times per step in three launches each. One launch per call now, bit-identical to the reference at the contracted product form. Decode only; prefill is untouched. See [Fused rotary embedding](#fused-rotary-embedding). |
@@ -1285,23 +1285,74 @@ Engram layer runs `_gather_cpu`:
 indices go D2H, rows are gathered and dequantized on the CPU, and the result comes
 back H2D. The D2H copy is synchronous, so that sequence is exposed in the step
 rather than overlapped. `profile_engram.py` measures it directly
-(`results/engram-cost.json`):
+(`results/engram-cost.json`, `results/probe-engram-torchops.txt`):
 
 | | |
 | --- | --- |
-| Decode step, baseline | 32.33 ms |
+| Decode step, baseline | 27.10 ms |
 | Engram calls per step | 2 |
-| Engram per step | 0.452 ms |
-| Engram per call | 0.226 ms |
-| Share of the decode step | 1.40% |
-| Instrumentation overhead | 0.052 ms (0.16%) |
+| Engram per step | 0.441 ms |
+| Engram per call | 0.220 ms |
+| Share of the decode step | 1.63% |
 
-The measurement adds synchronization and timing calls. The instrumented run was
-0.052 ms slower per step; this difference is not a formal error bound. The
-measured lookup accounts for about 1.4% of this B=1 decode workload. Eliminating
-that measured cost alone would have a small effect; it does not explain the
-reported gap to vLLM. This is not a comparison of offload enabled versus disabled,
-and does not establish the cost for prefill or larger batches.
+The measurement adds synchronization and timing calls. The measured lookup accounts
+for about 1.6% of this B=1 decode workload. Eliminating that measured cost alone
+would have a small effect; it does not explain the reported gap to vLLM. This is
+not a comparison of offload enabled versus disabled, and does not establish the
+cost for prefill or larger batches.
+
+### What the 0.22 ms/call is made of, and what was recovered
+
+The first attempt at this cost attributed it to dispatch count -- the chain was
+about nineteen tiny torch CPU ops -- and replaced the two fp8 decodes with
+256-entry numpy tables. That is a real saving but a small one, and the probe that
+split the call into its three pieces (`probe_engram_steps.py`,
+`results/probe-engram-steps.txt`) shows why:
+
+| Piece | per call |
+| --- | ---: |
+| D2H of the indices (192 bytes) | 29.9 us |
+| CPU gather and dequantize (24 rows x 256 values) | 68.3 us |
+| H2D of the gathered rows (12 KiB) | 62.0 us |
+| **total** | **160 us** |
+
+Both transfers are trivial in bytes, so the first two numbers are CUDA API and
+stream-sync latency, and the third is the scattered read of 24 rows out of a 23 GiB
+pinned table. Dispatch count was never the bulk of it. With the tables in place the
+same probe measures 0.323 ms/step and 0.162 ms/call, against 0.441 and 0.220 with the
+torch ops.
+
+The table lookup is nonetheless kept, because it is exact and free:
+
+| Change | ms/step | Decode | Tokens |
+| --- | ---: | ---: | --- |
+| fp8 and ue8m0 decodes as numpy tables | +0.165, +0.097 | +0.59%, +0.35% | identical |
+
+Two interleaved A/B runs of three and four repeats (`results/ab-engram-lut.json`,
+`results/ab-engram-lut-b.json`): 27.938 → 27.773 and 27.623 → 27.525 ms/step. It is
+exact by construction, not by tolerance: torch's fp8 -> fp32 conversion is exact
+(e4m3 carries three mantissa bits) and `2**(b - 127)` is an exact power of two for
+every exponent byte, so the 256-entry tables reproduce `float()` and `exp2` bit for
+bit over all 256 byte values, and the whole gather matches the expression it
+replaced on 0 of 6,144 bf16 elements at three seeds. The A/B reports identical
+tokens.
+
+One bug worth recording, because it is the kind that only a real run finds: the
+tables were built with `torch.arange(256, dtype=torch.uint8)`, which under the
+harnesses' `torch.set_default_device("cuda")` lands on the GPU, and the `.numpy()`
+that follows then raises. An isolated micro-benchmark did not call
+`set_default_device` and passed.
+
+**What is left, and why it was not taken.** Reordering cannot hide the remaining
+~0.28 ms/step. The two lookups depend only on the token ids, so both could in
+principle be issued at the top of the step, but the D2H is synchronous: issuing it
+before the GPU work leaves the CPU chain exposed in front of an idle GPU, and
+issuing it after means the D2H drains the segment that was just enqueued. Hiding it
+needs the gather on a worker thread, or the gather on the GPU, and the GPU-resident
+tables are the whole reason this path exists -- the two tables are 45.8 GiB per rank
+against about 50 GiB of headroom. A worker thread would put a collective
+(`ParallelEngramEmbedding` ends in an all-reduce) on a second thread for a 1.6%
+ceiling, which is not a trade worth making silently.
 
 ## Noise floor
 
@@ -1429,6 +1480,10 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   in-model comparison is the gate: 0 of 2,133,504 bf16 elements over 3,192 calls.
   `probe_rope_shapes.py` records the call sites, shapes, strides and frequency
   layouts the kernel has to accept.
+- `probe_engram_steps.py` splits the offloaded Engram gather into its D2H, CPU and
+  H2D pieces, which is what showed that its 0.22 ms/call is transfer latency rather
+  than the dispatch count the first attempt assumed. `probe_engram_chain.py` times
+  the same pieces in isolation under four-rank host contention.
 - `check_prefill_parity.py` measures the whole-prompt divergence and the
   same-configuration noise floor side by side.
 
