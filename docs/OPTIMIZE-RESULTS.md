@@ -35,7 +35,7 @@ Remaining work and follow-up status:
 | Marlin / FP4-expert kernel comparison | **Measured: 2.8× faster than the engine's grouped GEMV, graphed, at the real per-rank mix.** Not integrated; the two differ in activation precision (W4A16 vs the engine's W4A8), so a switch needs its own correctness gate. See [FP4 expert MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels). |
 | Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
 | Graph coverage beyond B=1 | **Measured and fixed.** The step graphs and their buffers are keyed by batch size (`DSV41F_SG_BATCH_MAX`, default 8) and the batched MoE no longer takes the prefill tile path below 8 rows. Batches of 2, 4 and 8 cost 50.4, 61.3 and 82.3 ms/step against 158.5-159.8 before, and the graphed and eager paths are bit-identical at every size. See [Batched decode](#batched-decode). |
-| Cohort admission | Missing. A cohort is whatever is in the wait queue when the engine asks for one, so a request that arrives a moment late waits for a full generation. Every measured concurrency-4 run left a straggler behind at 3.1-7.4 s TTFT. An admission window is the obvious fix and has not been measured. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
+| Cohort admission | Missing. A cohort is whatever is in the wait queue when the engine asks for one, so a request that arrives a moment late waits for a full generation. The three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and never admitted all four together; the stragglers saw 3.1-7.4 s TTFT. An admission window is the obvious fix and has not been measured. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
@@ -109,7 +109,7 @@ this section used to argue about.
 | ---: | ---: | ---: | ---: | --- |
 | 1 | 34.75 tok/s | 28.78 ms | 0.18 s | 3 of 3 runs one row |
 | 2 | 33.04 tok/s | 28.60 ms | 3.12 s | 1 run of two rows, 2 runs of two single rows |
-| 4 | 39.07 tok/s | 61.84 ms | 3.54 s | 3 of 3 runs three rows plus a straggler |
+| 4 | 39.07 tok/s | 61.84 ms | 3.54 s | cohorts of 3, 2, 2, 1 and 3 rows |
 
 Median per-step time by batch size, from the trace, every step replayed from the
 whole-step graph. The model-loop column is `bench_batch_decode.py` at a 2K prompt,
@@ -131,10 +131,11 @@ TTFT is the second request waiting for the first cohort's full 128-token
 generation, which is `128 x 28.5 ms = 3.65 s`.
 
 **The scheduler has no admission window.** A cohort is whatever is in the wait
-queue at the instant the engine asks. At concurrency 4 every run formed a cohort
-of three and left the fourth to run alone, and that straggler is the 3.1-7.4 s
-TTFT. This is the same mechanism as the concurrency-2 case and it is now measured
-rather than inferred.
+queue at the instant the engine asks. Across the three concurrency-4 runs the
+trace shows cohorts of 3, 2, 2, 1 and 3 rows: no run admitted all four requests
+together, and the requests left out ran alone and waited a full generation. Those
+stragglers are the 3.1-7.4 s TTFT. This is the same mechanism as the concurrency-2
+case and it is now measured rather than inferred.
 
 **The batched step was slow for two separate reasons, both now fixed.** See
 [Batched decode](#batched-decode) for the measurements. Before the fixes a batch

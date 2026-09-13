@@ -157,7 +157,7 @@ Concurrency works, and it is worth reading the [step trace](docs/OPTIMIZE-RESULT
 | 2 | 33.04 tok/s | 28.60 ms | 3.12 s |
 | 4 | 39.07 tok/s | 61.84 ms | 3.54 s |
 
-At concurrency 2 the two requests ran as two separate single-row cohorts in two of three runs, so the unchanged latency is concurrency 1 twice, not a batched step. At concurrency 4 every run formed a cohort of three and left the fourth to wait a full generation, which is the 3.1-7.4 s TTFT. A cohort is whatever is in the wait queue when the engine asks; there is no admission window.
+At concurrency 2 the two requests ran as two separate single-row cohorts in two of three runs, so the unchanged latency is concurrency 1 twice, not a batched step. The three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and never admitted all four together; the requests left out waited a full generation, which is the 3.1-7.4 s TTFT. A cohort is whatever is in the wait queue when the engine asks; there is no admission window.
 
 The batched step itself was slow for two reasons, both fixed. A batch of two cost 158.5 ms/step because the whole-step graph only ran at input shape `(1, 1)`, then 67.7 ms because the batched MoE took the grouped prefill path, whose tiles are 64 rows tall at any token count. It now costs 50.4 ms, and batch 4 and 8 cost 61.3 and 82.3 ms. See [Batched decode](docs/OPTIMIZE-RESULTS.md#batched-decode).
 
@@ -165,7 +165,7 @@ The batched step itself was slow for two reasons, both fixed. A batch of two cos
 
 - **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position, where the two paths agree. Over the whole prompt they differ by 15.7–16.1 on the logits with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
 - **Decode agreement holds only for a shared starting state.** It does not show that prompt processing builds equivalent state.
-- **Concurrency is measured and works, with a cohorting gap.** Aggregate throughput at concurrency 4 went from 15.03 to 39.07 tok/s once batched decode stopped falling off the whole-step graph and off the prefill MoE path. What remains is scheduling, not compute: a cohort is whatever is in the wait queue when the engine asks, so a straggler waits a full generation (3.1-7.4 s TTFT at concurrency 4). See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
+- **Concurrency is measured and works, with a cohorting gap.** Aggregate throughput at concurrency 4 went from 15.03 to 39.07 tok/s once batched decode stopped falling off the whole-step graph and off the prefill MoE path. What remains is scheduling, not compute: a cohort is whatever is in the wait queue when the engine asks, so a request that arrives a moment late waits a full generation (3.1-7.4 s TTFT at concurrency 4, where no run admitted all four requests together). See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
 - **No matched vLLM comparison.** Local vLLM numbers use different workloads and methods, so the speedup is uncontrolled.
 - **The custom-allreduce path does not run on this stack.** It is 1.6x faster than graphed NCCL in isolation, but routing the engine through it dies on a CUDA `invalid argument` from vLLM's kernel, so it is not integrated and the ~3.5 ms/step the trace attributes to the collective group is unclaimed.
 
