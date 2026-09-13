@@ -265,7 +265,10 @@ class ReferenceBackend:
             # engine holds one step's read in flight while it issues the next.
             pin = self._pin[self._pin_slot]
             if pin is None or pin.numel() < count:
-                pin = torch.empty(count, dtype=torch.long, pin_memory=True)
+                # device="cpu" explicitly: the inference harnesses call
+                # torch.set_default_device("cuda"), and a pinned tensor cannot be
+                # allocated on the device ("Only dense CPU tensors can be pinned").
+                pin = torch.empty(count, dtype=torch.long, pin_memory=True, device="cpu")
                 self._pin[self._pin_slot] = pin
             self._pin_slot ^= 1
             pin[:count].copy_(sampled.reshape(-1), non_blocking=True)
