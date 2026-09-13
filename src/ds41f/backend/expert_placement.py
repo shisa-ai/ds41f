@@ -167,13 +167,31 @@ def apply(model, placement_path: str, rank: int, world: int, verbose: bool = Fal
     n2o_all = blob["new_to_old"].long()
     dev = torch.cuda.current_device()
 
+    # A calibration is per-checkpoint. Applying one from a different checkpoint would
+    # silently mislabel experts (or index out of range), so check the shape and that
+    # each layer really is a permutation before touching the model.
+    if n2o_all.dim() != 2:
+        raise ValueError(f"{placement_path}: new_to_old must be 2-D, got {tuple(n2o_all.shape)}")
+
     for layer_id, block in enumerate(model.layers):
         moe = block.ffn
         if moe is None or not getattr(moe, "experts", None):
             continue
         n_experts = len(moe.experts)
         n_local = n_experts // world
+        if layer_id >= n2o_all.shape[0]:
+            raise ValueError(
+                f"{placement_path}: has {n2o_all.shape[0]} layers but the model's MoE "
+                f"layer {layer_id} needs one (calibration is from another checkpoint?)"
+            )
         n2o = n2o_all[layer_id].to(dev)
+        if n2o.numel() != n_experts or not torch.equal(
+            n2o.sort().values, torch.arange(n_experts, device=dev)
+        ):
+            raise ValueError(
+                f"{placement_path}: layer {layer_id} is not a permutation of "
+                f"0..{n_experts - 1} (calibration is from another checkpoint?)"
+            )
 
         permute_gate(moe.gate, n2o)
 
@@ -209,13 +227,18 @@ def _rank_world() -> tuple[int, int]:
     return 0, 1
 
 
-def maybe_apply(model, rank: int | None = None, world: int | None = None) -> bool:
+def maybe_apply(model, rank: int | None = None, world: int | None = None, path: str | None = None) -> bool:
     """Apply a balanced placement if one is configured. Returns whether it ran.
 
     ``DSV41F_EXPERT_PLACEMENT`` names the file; "none" (or "0") disables it. When
     it is unset, a calibrated ``expert_placement.pt`` sitting next to this module
     is used, so a calibrated deployment gets the balanced placement by default and
     an uncalibrated one is unaffected.
+
+    Pass ``path`` to name the file explicitly instead of using that lookup. Callers
+    that own a checkpoint should do so: the calibration is derived from the
+    checkpoint, so it belongs beside the checkpoint or the model repository, not
+    inside the engine package.
 
     Must be called on every rank together, after the model is loaded and before the
     first forward. ``rank``/``world`` default to the active process group.
@@ -226,11 +249,12 @@ def maybe_apply(model, rank: int | None = None, world: int | None = None) -> boo
         world = w if world is None else world
     if world <= 1:
         return False
-    path = os.environ.get("DSV41F_EXPERT_PLACEMENT")
     if path is None:
-        default = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expert_placement.pt")
-        path = default if os.path.exists(default) else None
-    elif path.lower() in ("", "none", "0"):
+        path = os.environ.get("DSV41F_EXPERT_PLACEMENT")
+        if path is None:
+            default = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expert_placement.pt")
+            path = default if os.path.exists(default) else None
+    if path is not None and path.lower() in ("", "none", "0"):
         path = None
     if not path:
         return False

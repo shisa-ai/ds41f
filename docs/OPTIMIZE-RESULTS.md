@@ -211,26 +211,61 @@ except the two flags the arms toggle.
 
 ## Serving-path changes
 
-`ds41f/src/ds41f/scheduler/scheduler.py` enforced only an upper length bound
-relative to the queue head, so `[8192, 512]` could share a cohort while the
-reverse order was split. `_admit` now enforces a symmetric spread
-(`max_len <= (1 + tolerance) * min_len`) and skips a too-short candidate instead
-of stopping the scan.
+**Expert placement was not wired into serving.** `expert_placement.maybe_apply`
+was called by `benchmark_ds41f.py` and the profilers but not by
+`serve/server.py:load_model_rank`, so a calibrated deployment served with
+contiguous expert ownership and got none of the placement's ~15% on 8K prefill.
+`generate.py` had been wired, but that is not the serving path. The loader now
+calls it on every rank, after the weights load and before the first forward.
 
-`ReferenceBackend` sampled per row, called `.item()`, and wrote each token back to
-CUDA. Sampling is now batched over the emitting cohort: one device gather, one
-top-p pass, one Gumbel-max draw, one indexed device write, and a single host
-transfer. Per-row temperature and top-p are preserved.
+The engine module's default lookup is a file beside the installed package, which
+does not exist for a model-repository calibration, so `maybe_apply` now takes an
+explicit `path` and the loader resolves it: `DSV41F_EXPERT_PLACEMENT` if set, then
+`<ckpt>/expert_placement.pt`, then the model repository's
+`inference/expert_placement.pt`. It logs which file it used, so a missing
+calibration is visible instead of silent. `apply` also now rejects a calibration
+that is not a per-layer permutation of the model's expert count, which is what a
+file from a different checkpoint looks like.
+
+Verified on the real checkpoint: `torchrun --nproc-per-node 4` through
+`serve/server.py`'s loader reports
+`[placement] applied=True file=.../inference/expert_placement.pt`, with a
+non-identity layer-0 permutation, on a run that exits cleanly.
+
+**Length bucketing.** `scheduler.py` enforced only an upper length bound relative
+to the queue head, so `[8192, 512]` could share a cohort while the reverse order
+was split. `_admit` now enforces a symmetric spread
+(`max_len <= (1 + tolerance) * min_len`) and skips an out-of-tolerance candidate
+instead of stopping the scan. It used to stop when a candidate was *longer* than
+the cohort's maximum, on the assumption that the queue was length-sorted; it is in
+arrival order, so `[1000, 8192, 1050]` admitted only `[1000]` and left the
+compatible 1050 waiting. Only an exclusive row stops the scan now.
+
+**Batched sampling.** `ReferenceBackend` sampled per row, called `.item()`, and
+wrote each token back to CUDA. Sampling is now batched over the emitting cohort:
+one device gather, one top-p pass, one Gumbel-max draw, one indexed device write,
+and a single host transfer. Per-row temperature and top-p are preserved.
 
 The single-host-transfer claim was wrong as first written: `_sample_batch` still
 had `if bool((tops < 1.0).any())` and `if bool(greedy.any())`, each of which drains
-the pipeline, so a decode step did three host round-trips. Both guards were only
-shortcuts — the top-p block is already a no-op for `tops >= 1.0` through its
-`keep | (tops >= 1.0)` clause, and `torch.where` is correct when no row is greedy —
-so they are gone and the claim now holds.
+the pipeline, so a decode step did three host round-trips. Removing them fixed the
+round-trips but not the deeper problem: the batched path drew a full `rand_like`
+for every row even when the whole cohort was greedy, so a greedy workload advanced
+the global generator and shifted the stream seen by later stochastic requests. The
+per-row path drew nothing for a greedy row, so this was a regression in RNG
+semantics, and the original requirement to preserve it was not met.
 
-These are covered by 54 engine tests (`python -m pytest tests/` in the engine
-repository), 17 of them new. The scheduler and sampling changes are not visible in
+Temperatures and top_p reach `_sample_batch` as Python floats, so the branch is
+host-side and costs no synchronization. A greedy-only cohort now returns argmax
+without touching the RNG or computing softmax, the top-p sort is skipped when no
+row asks for it, and the stochastic rows draw one `rand_like` each in row order,
+so the generator advances exactly as it did before. Three tests pin this: a
+greedy-only cohort leaves `torch.get_rng_state()` unchanged, a mixed cohort
+advances it by exactly `stochastic_rows * vocab`, and `top_p=1.0` samples
+identically to `top_p=0.999999`.
+
+These are covered by 67 engine tests (`python -m pytest tests/` in the engine
+repository), 24 of them new. The scheduler and sampling changes are not visible in
 `benchmark_ds41f.py`, which measures model-only prefill and decode.
 
 ## Collectives
