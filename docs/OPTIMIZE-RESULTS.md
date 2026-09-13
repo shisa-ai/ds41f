@@ -307,6 +307,35 @@ synchronization (post-fusion, B=1, 2K). The synchronization is the only part tha
 is pure host-side loss, and recovering it needs the delivery path to read a token
 from step *i* after enqueueing step *i+1*, not before.
 
+### What removing that 3.12 ms actually requires
+
+`LLMEngine._run_inner` is a serial loop: `backend.execute(plan, state)` and then
+`_deliver(results)`. The host read (`sampled.tolist()` in `ReferenceBackend._collect`)
+happens inside `execute`, before `_deliver`, so the pipeline drains once per step.
+Overlapping it means splitting `execute` into "enqueue step *i*" and "resolve step
+*i-1*", which is a change to the engine's step contract, not a local edit.
+
+The reason it needs care rather than just being written is that a pipelined step
+commits to a row before that row's fate is known:
+
+- **EOS.** The token that ends a row is only readable after step *i+1* has been
+  enqueued, so a finished row gets one more step. Its own output is discardable,
+  but the sampling for that step still draws from the RNG, and the rows of a cohort
+  are sampled as one batch. A different number of draws shifts the stream for the
+  rows that have *not* finished, so "one wasted step" is not the whole cost -- it
+  can change the tokens of a co-resident request. Cancellation and `max_tokens`
+  reach the same hazard by the same path.
+- **RNG.** Today each step's draw happens after the previous step's token is known,
+  so the number of draws per step is a function of the cohort's state. Pipelining
+  decouples those, which is what makes the above reachable.
+
+The existing evidence that the drain is removable -- byte-identical tokens between
+pipelined and synchronized modes in `probe_decode_cpu.py` -- is model-only, single
+request, greedy. It does not cover a cohort with mixed finishes, and that is the
+case where the hazard lives. Any implementation should be gated on a test that runs
+a multi-request cohort with differing EOS positions and a nonzero temperature, and
+compares against the serial path.
+
 ## Decode kernel fusion
 
 The [step budget](#decode-step-budget) says decode is launch-count-bound: 6,232
