@@ -85,3 +85,40 @@ def test_decode_plan_covers_active_rows_with_positions():
     by_id = {r.req_id: r for r in plan.rows}
     assert by_id[first.req_id].positions == (13,)
     assert by_id[active[sorted(active)[1]].req_id].positions == (12,)
+
+
+def test_oversized_request_does_not_block_later_compatible_ones():
+    """Requests enter in arrival order, not length order. An out-of-tolerance prompt
+    in the middle must be skipped, not treated as the start of a longer tail."""
+    s = StateStore(max_rows=8, max_context_tokens=200_000)
+    sched = StaticCohortScheduler(
+        EngineConfig(max_active_sequences=8, cohort_bucket_tolerance=0.5), s
+    )
+    waiting = deque(make_requests([[1] * 1000, [1] * 8192, [1] * 1050]))
+    plan = sched.next_plan(waiting, {})
+    admitted = sorted(len(r.prompt_tokens) for r in plan.rows)
+    assert admitted == [1000, 1050]
+    # the oversized one stays queued, in front of nothing it displaced
+    assert [len(r.prompt_tokens) for r in waiting] == [8192]
+
+
+def test_undersized_request_does_not_block_later_compatible_ones():
+    """The symmetric case: a short prompt between two long ones."""
+    s = StateStore(max_rows=8, max_context_tokens=200_000)
+    sched = StaticCohortScheduler(
+        EngineConfig(max_active_sequences=8, cohort_bucket_tolerance=0.5), s
+    )
+    waiting = deque(make_requests([[1] * 2000, [1] * 100, [1] * 2100]))
+    plan = sched.next_plan(waiting, {})
+    assert sorted(len(r.prompt_tokens) for r in plan.rows) == [2000, 2100]
+    assert [len(r.prompt_tokens) for r in waiting] == [100]
+
+
+def test_scan_still_stops_after_an_exclusive_row():
+    """Exclusive rows run alone, so nothing after one may join its cohort."""
+    s = StateStore(max_rows=8, max_context_tokens=200_000)
+    sched = StaticCohortScheduler(EngineConfig(max_active_sequences=8), s)
+    reqs = make_requests([[1] * 100, [1] * 100, [1] * 100])
+    reqs[0].exclusive = True
+    plan = sched.next_plan(deque(reqs), {})
+    assert len(plan.rows) == 1

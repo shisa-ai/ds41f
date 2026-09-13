@@ -95,10 +95,10 @@ class StaticCohortScheduler:
                 continue
             if cohort and max(hi, length) > tolerance * min(lo, length):
                 # both a too-long and a too-short prompt break the shortest-first
-                # prefill economics; requeue either one
+                # prefill economics; requeue either one. Do not stop the scan: the
+                # queue is in arrival order, not length order, so a later request
+                # may still fit the cohort. [1000, 8192, 1050] admits 1000 and 1050.
                 requeue.append(req)
-                if length > hi:
-                    stop = True  # queue lengths are ordered; later rows are longer still
                 continue
             if not self.state.can_admit(length, req.params.max_new_tokens):
                 requeue.append(req)  # over context budget: requeue, never admit partially

@@ -385,3 +385,98 @@ def test_greedy_row_ignores_top_p():
     )
     res = be.execute(StepPlan(ordinal=0, op="prefill", rows=rows), StateStore(2, 100))
     assert [r.tokens for r in res] == [(100,), (101,)]
+
+
+def test_greedy_only_cohort_does_not_advance_rng():
+    """A greedy request must consume no random numbers. The batched sampler drew a
+    full rand_like for every row before this, so a greedy workload advanced the
+    global generator and shifted the stream seen by later stochastic requests."""
+    import torch
+
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    rows = tuple(
+        PlanRow(
+            req_id=i + 1,
+            row=RowRef(slot=i, generation=0),
+            prompt_tokens=(100, 101, 102),
+            positions=(0, 1, 2),
+            max_new_tokens=4,
+            temperature=0.0,
+            top_p=0.5,  # greedy ignores top_p, and must not filter or draw
+        )
+        for i in range(3)
+    )
+    torch.manual_seed(0)
+    before = torch.get_rng_state().clone()
+    res = be.execute(StepPlan(ordinal=0, op="prefill", rows=rows), StateStore(3, 100))
+    assert torch.equal(torch.get_rng_state(), before)
+    assert [r.tokens for r in res] == [(100,), (101,), (102,)]
+
+
+def test_stochastic_rows_draw_exactly_one_rand_like_each():
+    """One draw per stochastic row, in row order, so the generator advances by
+    exactly rows*vocab values -- the same as the per-row sampler did."""
+    import torch
+
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    plan = StepPlan(ordinal=0, op="prefill", rows=_mixed_params_rows(top_p_row1=1.0))
+
+    torch.manual_seed(0)
+    be.execute(plan, StateStore(3, 100))
+    after = torch.get_rng_state()
+
+    torch.manual_seed(0)
+    torch.rand(1 * 1000)  # the single stochastic row's vocabulary is 1000
+    assert torch.equal(after, torch.get_rng_state())
+
+
+def test_mixed_cohort_greedy_rows_still_ignore_top_p():
+    """A greedy row whose top_p would exclude its argmax still takes the raw argmax,
+    now via a host-side row split instead of torch.where."""
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+    rows = tuple(
+        PlanRow(
+            req_id=i + 1,
+            row=RowRef(slot=i, generation=0),
+            prompt_tokens=(100, 101, 102),
+            positions=(0, 1, 2),
+            max_new_tokens=4,
+            temperature=0.0 if i != 1 else 1.0,
+            top_p=0.01,
+        )
+        for i in range(3)
+    )
+    res = be.execute(StepPlan(ordinal=0, op="prefill", rows=rows), StateStore(3, 100))
+    assert [r.tokens for r in res][0] == (100,)
+    assert [r.tokens for r in res][2] == (102,)
+
+
+def test_all_top_p_one_skips_the_sort_but_still_samples():
+    """needs_topp=False must not change the distribution: with tops all 1.0 the
+    filter was a no-op anyway, so the two paths must agree token for token."""
+    import torch
+
+    be = ReferenceBackend(RowLogitsStubModel(), eos_token_id=500)
+
+    def draw(top_p, seed=0):
+        rows = tuple(
+            PlanRow(
+                req_id=i + 1,
+                row=RowRef(slot=i, generation=0),
+                prompt_tokens=(100, 101, 102),
+                positions=(0, 1, 2),
+                max_new_tokens=1,
+                temperature=1.0,
+                top_p=top_p,
+            )
+            for i in range(2)
+        )
+        out = []
+        for _ in range(20):
+            torch.manual_seed(seed)
+            be._reset()
+            res = be.execute(StepPlan(ordinal=0, op="prefill", rows=rows), StateStore(2, 100))
+            out.append(tuple(r.tokens[0] for r in res))
+        return out
+
+    assert draw(1.0) == draw(0.999999)

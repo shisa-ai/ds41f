@@ -216,37 +216,50 @@ class ReferenceBackend:
 
         idx = torch.tensor(emit, dtype=torch.long, device=logits.device)
         rows = logits.index_select(0, idx).float()
-        temps = torch.tensor(
-            [self._params[i][0] for i in emit], dtype=torch.float32, device=rows.device
-        )
-        tops = torch.tensor(
-            [self._params[i][1] for i in emit], dtype=torch.float32, device=rows.device
-        )
-        greedy = temps <= 0
-        safe_temps = torch.where(greedy, torch.ones_like(temps), temps)
-        scaled = rows / safe_temps.unsqueeze(1)  # argmax is scale-invariant
-        # No host-side branch on the parameters: `bool(tops.any())` and `bool(greedy.any())`
-        # each drain the pipeline once per step, and both guards are only shortcuts.
-        # The top-p block is already a no-op for tops >= 1.0 (the `keep |` clause below
-        # keeps every position), and torch.where is correct when no row is greedy.
-        sorted_logits, order = scaled.sort(dim=-1, descending=True)
-        sorted_probs = torch.softmax(sorted_logits, -1)
-        cum = sorted_probs.cumsum(-1)
-        # keep everything strictly before the mass crosses top_p
-        keep = (cum - sorted_probs) < tops.unsqueeze(1)
-        keep[:, 0] = True
-        keep = keep | (tops.unsqueeze(1) >= 1.0)
-        filtered = torch.full_like(scaled, float("-inf"))
-        filtered.scatter_(-1, order, torch.where(keep, sorted_logits, float("-inf")))
-        scaled = filtered
+
+        # Temperatures and top_p arrive from the plan as Python floats, so the branch
+        # on them is a host-side branch that costs no device synchronization -- unlike
+        # `bool(temps.any())`, which drains the pipeline once per step. It matters for
+        # more than speed: a greedy request must not consume random numbers, or a
+        # greedy workload advances the global generator and changes the stream seen by
+        # every later stochastic request. The pre-batching path drew nothing for a
+        # greedy row, so this restores that.
+        params = [self._params[i] for i in emit]
+        stoch = [k for k, (t, _) in enumerate(params) if t > 0]
+        if not stoch:
+            return rows.argmax(-1)
+        needs_topp = any(p < 1.0 for _, p in params)
+
+        s_idx = torch.tensor(stoch, dtype=torch.long, device=logits.device)
+        s_rows = rows.index_select(0, s_idx)
+        temps = torch.tensor([params[k][0] for k in stoch], dtype=torch.float32, device=rows.device)
+        tops = torch.tensor([params[k][1] for k in stoch], dtype=torch.float32, device=rows.device)
+
+        scaled = s_rows / temps.unsqueeze(1)
+        if needs_topp:
+            sorted_logits, order = scaled.sort(dim=-1, descending=True)
+            sorted_probs = torch.softmax(sorted_logits, -1)
+            cum = sorted_probs.cumsum(-1)
+            # keep everything strictly before the mass crosses top_p
+            keep = (cum - sorted_probs) < tops.unsqueeze(1)
+            keep[:, 0] = True
+            keep = keep | (tops.unsqueeze(1) >= 1.0)
+            filtered = torch.full_like(scaled, float("-inf"))
+            filtered.scatter_(-1, order, torch.where(keep, sorted_logits, float("-inf")))
+            scaled = filtered
         probs = torch.softmax(scaled, -1)
-        # Gumbel-max: argmax_i log p_i + Gumbel_i == argmax_i p_i / Exp_i
+        # Gumbel-max: argmax_i log p_i + Gumbel_i == argmax_i p_i / Exp_i. One draw per
+        # stochastic row, in row order, so the generator advances exactly as it would
+        # have under the per-row sampler.
         u = torch.rand_like(probs).clamp_min(torch.finfo(probs.dtype).tiny)
         gumbel = -torch.log(-torch.log(u))
         sampled = (probs.log() + gumbel).argmax(-1)
-        # greedy rows ignore top_p, so they take the raw argmax; torch.where is correct
-        # when no row is greedy, so this needs no host-side branch.
-        return torch.where(greedy, rows.argmax(-1), sampled)
+
+        if len(stoch) == rows.shape[0]:
+            return sampled
+        out = rows.argmax(-1)  # greedy rows ignore top_p entirely
+        out[s_idx] = sampled
+        return out
 
 
 def _new_tokens_buffer(batch: int, total: int, rows, prompt_lens):
