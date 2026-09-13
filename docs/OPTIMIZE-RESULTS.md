@@ -37,7 +37,7 @@ Remaining work and follow-up status:
 | Graph coverage beyond B=1 | **Measured and fixed.** The step graphs and their buffers are keyed by batch size (`DSV41F_SG_BATCH_MAX`, default 8) and the batched MoE no longer takes the prefill tile path below 8 rows. Batches of 2, 4 and 8 cost 50.4, 61.3 and 82.3 ms/step against 158.5-159.8 before, and the graphed and eager paths are bit-identical at every size. See [Batched decode](#batched-decode). |
 | Cohort admission | **Implemented and measured, off by default.** A cohort is whatever is in the wait queue when the engine asks, so a request that arrives a moment late waits for a full generation: the three concurrency-4 runs formed cohorts of 3, 2, 2, 1 and 3 rows and the stragglers saw 3.1-7.4 s TTFT. `DS41F_ADMIT_WINDOW_MS=8` holds an under-filled cohort open for 8 ms and fixes it: 40.80 -> 52.42 tok/s aggregate and 3702 -> 226 ms worst TTFT at concurrency 4, for a bounded delay paid only when the engine is idle. See [Concurrency](#concurrency-what-the-scheduler-actually-executed). |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
-| Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion. Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
+| Per-step synchronization | Measured at 3.12 ms/step (11%) post-fusion; 2.8-3.1 ms (9%) pre-fusion, in a single-process model loop. Pipelining the token read was implemented and measured: it recovers none of it, because the served path's per-step barrier is the blocking NCCL broadcast inside `BroadcastModel.forward`, not the read (median 28.80 ms in `enqueue`, 0.019 ms in `resolve`). See [Decode step budget](#decode-step-budget). |
 | Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth 11.9% lower decode latency (32.599 → 28.716 ms/step, ~13.5% higher tok/s) at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
@@ -543,37 +543,75 @@ repeated without the flag.
 The step budget therefore reads: 24.8 ms of kernel execution, roughly 3.7 ms of
 inter-kernel gaps inside the graph replays, and 3.12 ms of exposed
 synchronization (post-fusion, B=1, 2K). The synchronization is the only part that
-is pure host-side loss, and recovering it needs the delivery path to read a token
-from step *i* after enqueueing step *i+1*, not before.
+is pure host-side loss in a single-process model loop, and the obvious way to
+recover it is to read a token from step *i* after enqueueing step *i+1*.
 
-### What removing that 3.12 ms actually requires
+### That 3.12 ms was implemented and measured, and the served path cannot use it
 
-`LLMEngine._run_inner` is a serial loop: `backend.execute(plan, state)` and then
-`_deliver(results)`. The host read (`sampled.tolist()` in `ReferenceBackend._collect`)
-happens inside `execute`, before `_deliver`, so the pipeline drains once per step.
-Overlapping it means splitting `execute` into "enqueue step *i*" and "resolve step
-*i-1*", which is a change to the engine's step contract, not a local edit.
+`ReferenceBackend` now splits `execute` into `enqueue` (forward, sampling, device
+write-back, then a non-blocking copy of the sampled ids into a pinned buffer and a
+recorded event) and `resolve` (wait on the event, read the buffer). A pipelined
+`LLMEngine` loop was written on top: build step *i*'s plan, enqueue it, and only
+then read step *i-1*'s tokens. It produced token-identical greedy output on every
+arm of `serve/check_pipeline_parity.py`, including a real prefix-cache hit
+(shared=85 of 98 tokens) and a four-row stochastic cohort, and it **bought
+nothing**:
 
-The reason it needs care rather than just being written is that a pipelined step
-commits to a row before that row's fate is known:
+| | serial | pipelined |
+| --- | ---: | ---: |
+| concurrency 1, inter-token | 28.77 ms | 28.91 ms |
+| concurrency 4, inter-token | 68.23 ms | 68.31 ms |
+| concurrency 1, TTFT | 196.3 ms | 233.0 ms |
 
-- **EOS.** The token that ends a row is only readable after step *i+1* has been
-  enqueued, so a finished row gets one more step. Its own output is discardable,
-  but the sampling for that step still draws from the RNG, and the rows of a cohort
-  are sampled as one batch. A different number of draws shifts the stream for the
-  rows that have *not* finished, so "one wasted step" is not the whole cost -- it
-  can change the tokens of a co-resident request. Cancellation and `max_tokens`
-  reach the same hazard by the same path.
-- **RNG.** Today each step's draw happens after the previous step's token is known,
-  so the number of draws per step is a function of the cohort's state. Pipelining
-  decouples those, which is what makes the above reachable.
+Timed separately per step under the pipelined loop, the host spends a median
+**28.80 ms inside `enqueue`** and **0.019 ms inside `resolve`**. The read is not on
+the critical path at all. `enqueue` is where the whole step goes because the served
+model is `BroadcastModel`, whose `forward` ends in a blocking NCCL broadcast that
+every rank must arrive at: rank 0 cannot enqueue step *i+1*'s forward before step
+*i* has finished on all four ranks, so the GPU queue can never hold two steps.
 
-The existing evidence that the drain is removable -- byte-identical tokens between
-pipelined and synchronized modes in `probe_decode_cpu.py` -- is model-only, single
-request, greedy. It does not cover a cohort with mixed finishes, and that is the
-case where the hazard lives. Any implementation should be gated on a test that runs
-a multi-request cohort with differing EOS positions and a nonzero temperature, and
-compares against the serial path.
+So the 3.12 ms is real and is not recoverable from the token read. The served path
+does pay an equivalent per-step barrier, but the barrier is the broadcast: the fix
+is to stop making rank 0 rendezvous with its peers every step (send the step spec
+one step early, or let every rank drive its own engine), not to move the host read.
+Until then the split contract stays as the engine's step contract, unused for
+overlap, because it is the one place such a change would land.
+
+Two things this run settled that were open questions above:
+
+- **The RNG hazard is narrower than feared, and still real.** A finished row keeps
+  its place in the fixed cohort and keeps drawing, so the *number* of draws per
+  step does not depend on finishes -- the emit set is a function of position
+  against prompt length only. What pipelining changes is the *number of steps*: the
+  extra trailing decode step draws once more per cohort row from the global
+  generator, which shifts the stream for every later stochastic request. Greedy
+  output is unaffected. That is why the loop was removed rather than left behind a
+  default-off flag: a flag that changes sampled tokens and buys nothing is a trap.
+- **The capture boundary survives it.** `on_finish` keys a snapshot by
+  `prompt + completion[:-1]`, and under pipelining the caches have advanced one
+  position further when the hook fires. The key still names a prefix the caches
+  cover, and the position past it is overwritten on restore from `shared_len`, so
+  the round trip is exact: the prefix-hit arm of the parity harness produced the
+  same continuation with and without pipelining, from a genuine hit.
+
+The gate the previous text asked for -- a multi-request cohort with differing
+finish positions and a nonzero temperature, compared against the serial path -- is
+`serve/check_pipeline_parity.py`, and it is what caught the stochastic difference.
+
+### What a pipelined step would have had to get right
+
+The plan for step *i* is built from finish state that is one step old, because it
+is built before step *i-1*'s tokens are read. Two consequences, both handled in the
+implementation that was measured and then removed:
+
+- A decode plan's row set does not depend on finishes, because a finished row keeps
+  its place in the fixed cohort. The one case that does is a drained cohort, where
+  the next plan would be a prefill that admits new rows and overwrites
+  `_last_cohort` before the drained rows have been captured; the engine resolved the
+  in-flight step before planning in that case.
+- The last rows to finish are not known to be finished, so the cohort takes one
+  more decode step than the serial path. That step needs one position of slack in
+  the cohort's token buffer, and it is what shifts the generator stream.
 
 ## Decode kernel fusion
 
@@ -1317,12 +1355,14 @@ experts. A recorded example is `results/manifest-shipped.json`
   interchangeable and a switch needs its own correctness gate. See [FP4 expert
   MoE against vLLM's Marlin MXFP4 kernels](#fp4-expert-moe-against-vllms-marlin-mxfp4-kernels).
 - **Per-step synchronization (OPTIMIZE.md section 3).** Measured at 3.12 ms/step
-  (11% of the post-fusion step; 2.8-3.1 ms, 9%, before fusion) and shown to be
-  removable without changing tokens when prefill is
-  deterministic, but not removed. The fix belongs in the delivery path: enqueue
-  step *i+1* before reading step *i*'s sampled token, rather than syncing to read
-  it first. `benchmark_ds41f.py` and `ReferenceBackend._collect` both drain per
-  step today.
+  (11% of the post-fusion step; 2.8-3.1 ms, 9%, before fusion) in a single-process
+  model loop, and shown to be removable there. Pipelining the token read was then
+  implemented on real weights and recovered nothing on the served path: the host is
+  blocked a median 28.80 ms inside `enqueue` (the blocking NCCL broadcast in
+  `BroadcastModel.forward`) against 0.019 ms inside `resolve` (the read), and served
+  inter-token latency was 28.77 ms serial against 28.91 ms pipelined. The barrier to
+  remove is the per-step broadcast rendezvous, not the read. The split step contract
+  (`enqueue`/`resolve`) and `serve/check_pipeline_parity.py` are kept for that work.
 - **Kernel launch count (OPTIMIZE.md section 3).** Measured: 6,232 launches per
   decode step, median 1.82 µs, with 46% of kernel time in 5,772 small
   elementwise/copy/reduce kernels. No fusion implemented. This is the largest
