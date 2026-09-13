@@ -6,8 +6,8 @@ list — see [Scope and status](#scope-and-status) before reading the numbers as
 progress figure.
 
 The tuning-pass comparison comes from `benchmark_ds41f.py` on GPU0-3 (4 x H20-3e, TP=4) with
-`DSV41F_ENGRAM_OFFLOAD=1`. That harness alternates the two arms, restores a
-buffer snapshot before each arm, repeats, and reports the worst rank. The tables
+`DSV41F_ENGRAM_OFFLOAD=1`. That harness alternates the two arms, re-prefills for
+each arm, repeats, and reports the worst rank. The tables
 below use its optimized arm. Prompt tokens are random ids.
 
 These are single-host measurements, not a controlled speedup claim. They are
@@ -17,7 +17,9 @@ different protocol.
 
 ## Scope and status
 
-Done and measured: the decode kernel work (FP8 GEMV, warp counts), the prefill
+Done and measured: the decode kernel work (FP8 GEMV, warp counts), the decode
+fusion pass (RMSNorm, hyper-connections, MoE SwiGLU; 6,232 to 4,558 launches/step
+and +11.91% decode, bit-identical tokens), the prefill
 MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
 the fused hyper-connection kernels, two serving-path fixes (symmetric length
 bucketing, batched on-device sampling), the packed token-broadcast protocol, a
@@ -34,7 +36,7 @@ Remaining work and follow-up status:
 | Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
 | Engram lookup cost | Measured at 0.45 ms/step, 1.4% of decode. The optimisation (moving the lookup into the graph or keeping a hot subset resident) is not attempted. See [Engram lookup cost](#engram-lookup-cost). |
 | Per-step synchronization | Measured at 2.8-3.1 ms/step (9%). Not removed: the delivery path reads the token before enqueueing the next step. See [Decode step budget](#decode-step-budget). |
-| Kernel launch count | Measured: 6,232 launches/step, median 1.82 µs, 46% of kernel time in small elementwise/copy/reduce kernels. No fusion implemented. See [Decode step budget](#decode-step-budget). |
+| Kernel launch count | Measured and reduced: 6,232 to 4,558 launches/step (−27%) by fusing the decode RMSNorm, hyper-connection and SwiGLU chains, worth +11.91% decode at identical tokens. See [Decode kernel fusion](#decode-kernel-fusion). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | Measured. Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; FlashInfer is 1.2-1.3x faster than eager NCCL there. An end-to-end gain is not established. See [Collectives](#collectives). |
 | Deterministic prefill | Measured, not enabled. A fixed-order accumulation makes the prefill bit-reproducible at ~2% prefill cost and no extra peak memory. See [Noise floor](#noise-floor). |
@@ -255,6 +257,138 @@ inter-kernel gaps inside the graph replays, and 2.8-3.1 ms of exposed
 synchronization. The synchronization is the only part that is pure host-side loss,
 and recovering it needs the delivery path to read a token from step *i* after
 enqueueing step *i+1*, not before.
+
+## Decode kernel fusion
+
+The [step budget](#decode-step-budget) says decode is launch-count-bound: 6,232
+launches per step with a median kernel of 1.82 µs, and 37% of the kernel time in
+the elementwise, copy and reduce group alone (41% including activation
+quantization). That is where fusion pays, and this pass fused the three chains the
+punchlist named
+([OPTIMIZE.md](OPTIMIZE.md#3-qualify-existing-fusion-and-close-graphhost-gaps)):
+RMSNorm, the hyper-connection pre/post mixers, and the MoE SwiGLU.
+
+Each was accepted only after a **bit-exactness check against the reference
+expression**, because decode is the one path in this engine that is currently
+reproducible token-for-token, and that property is worth more than a few percent.
+The checks are listed in [Verification](#verification).
+
+| Change | Reference launches | Fused launches | Est. removed/step | ms/step | Decode | Tokens |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Fused `hc_pre`/`hc_post` at decode | ~18/layer | 4/layer | ~560 | +1.755 | +5.76% | identical |
+| Fused RMSNorm at decode | 8/norm | 2/norm | ~1,000 | +1.793 | +5.85% | identical |
+| Fused SwiGLU+route in the MoE | 9/layer | 1/layer | ~320 | +0.569 | +1.93% | identical |
+| **All three together** | | | **1,674** | **+3.883** | **+11.91%** | **identical** |
+
+The per-change rows are separate interleaved A/B runs (three repeats each, worst
+rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
+(`results/ab-hc-fused-decode.json`, `results/ab-rmsnorm-fused.json`,
+`results/ab-moe-swiglu-fused.json`). The combined row toggles all three flags at
+once (`results/ab-combined-decode-fusion.json`); it is 11.91% rather than the
+13.5% the rows sum to, which is the expected sub-additivity when several changes
+all remove the same kind of launch. The est. removed/step column is the launch
+arithmetic, not a measurement; it sums to ~1,880 against a measured net of 1,674,
+because the per-change counts come from the reference expressions while the
+measured net comes from the two traces below.
+
+### Where the launches went
+
+Two 20-step traces at B=1, 2K context, analysed with `analyze_decode_trace.py`
+(`results/decode-trace-fusion.txt`):
+
+| Kernel group | launches/step, before | after | ms/step, before | after |
+| --- | ---: | ---: | ---: | ---: |
+| elementwise, copy and reduce | 4,980 | 2,774 | 9.48 | 5.21 |
+| fused RMSNorm (`_square_cast` + `_rms_apply`) | — | 332 | — | 0.38 |
+| fused hyper-connections | — | 161 | — | 0.24 |
+| fused SwiGLU+route | — | 40 | — | 0.08 |
+| dense FP8 GEMV | 290 | 290 | 3.18 | 3.18 |
+| NCCL all-reduce | 92 | 92 | 3.07 | 4.86 |
+| sparse attention | 40 | 40 | 2.74 | 2.75 |
+| MoE gate+up (`_w13`) | 40 | 40 | 2.36 | 2.34 |
+| MoE down (`_w2`) | 40 | 40 | 1.77 | 1.73 |
+| activation quantization | 410 | 410 | 1.05 | 1.05 |
+| radix/bitonic sorts | 98 | 98 | 0.79 | 0.79 |
+| other GEMMs (nvjet/cutlass) | 60 | 60 | 0.62 | 0.62 |
+| MoE combine | 40 | 40 | 0.10 | 0.10 |
+| remainder | 140 | 140 | 0.61 | 0.61 |
+| **total** | **6,232** | **4,558** | **25.77** | **23.92** |
+
+**6,232 to 4,558 launches per step, a 27% reduction**, entirely in the small-kernel
+groups. The fused kernels that replace them are 533 launches totalling 0.69 ms.
+
+One row needs a caveat. The bf16 all-reduce is 11 launches in both traces but 0.46
+ms before and 2.17 ms after. A single trace per configuration cannot separate
+run-to-run variance in the collective from a real effect: with fewer kernels on
+the GPU, a collective that previously overlapped other work is more exposed. The
+end-to-end A/B (+11.91%, three repeats, interleaved) is the trustworthy number
+here; the per-group split is one trace each and should be read as indicative.
+
+### Why the reductions stayed in torch
+
+The first attempt at each of these was a single kernel that computed the whole
+chain, and for the RMSNorm and SwiGLU that kernel was *not* bit-exact. Two
+specific causes, both worth recording because they are easy to hit again:
+
+- **`tl.exp` and `tl.sqrt` are not `expf` and `sqrtf`.** Triton's `tl.exp`
+lowers to a fast `exp2`-based path: `probe_swiglu_steps.py` finds it differing from
+`torch.exp` on **55,722 of 82,944** fp32 inputs. `tl.sqrt` is `sqrt.approx.f32`, and
+Triton's default fp32 division is not `div.rn`. The working formulations are
+`triton.language.extra.libdevice.exp` and `tl.math.rsqrt`, which are bit-identical
+to `torch.exp` and `torch.rsqrt` (4,096/4,096 in `probe_rsqrt.py`). The SwiGLU
+kernel needed `tl.fdiv(..., ieee_rounding=True)` as well.
+- **`torch.mean`'s reduction order is not reproducible in a kernel.** `probe_rsqrt.py`
+tries a single masked block, 1024-wide and 128-wide chunked accumulation, and a
+strictly sequential sum: none agree with `torch.mean` on more than part of the
+dimensions (at 5120, four of eight rows differ for the best of them).
+
+So the fused RMSNorm does **not** compute `var`. It fuses the cast and square into
+one kernel, calls torch's own `mean`, and fuses `add + rsqrt + mul + mul + cast`
+into a second. The reduction is torch's, so the result is exact by construction.
+That is also why it is two kernels rather than one.
+
+The same reasoning applied to the hyper-connection mixers, which already had
+fused kernels validated for prefill: they were gated to `x.size(1) > 1`, and the
+single-token path kept the reference expression on the assumption that its cost
+was negligible. `check_hc_exact.py` now covers `s=1` and finds them bit-identical
+there too, so the gate is relaxed behind its own `DSV41F_HC_FUSED_DECODE` flag.
+
+### The one-launch RMSNorm, measured and not enabled
+
+A single kernel that computes the sum of squares itself is faster still, and it is
+kept as `DSV41F_RMSNORM_ONEPASS` (default off):
+
+| Variant | Decode vs the two-kernel path | Exactness |
+| --- | ---: | --- |
+| Two kernels, torch reduction (default) | — | 0 / 1,408,000 bf16 elements differ |
+| One kernel, own reduction | +2.97% | ~5 per 1,000,000 elements, 1 bf16 ulp |
+
+The one-launch variant's decode tokens matched the reference over 64 eager steps
+but diverged at step 19 in a 30-step graph-replayed A/B, which is what an error
+rate of ~5e-6 over ~240 norm calls per step predicts. It is the same trade as the
+fixed-order prefill path: measured, recorded, off by default.
+
+### The end-to-end gate, and one field that is not about this change
+
+`benchmark_ds41f.py` was run with all three fusions on and with all three off
+(`results/decode-fusion-e2e.json`, `results/decode-fusion-e2e-off.json`), each
+with `--no-parity-abort` so every length and repeat is recorded:
+
+| Run | decode `top1_agreement` | decode `max_logit_diff` | prefill last-position `max_logit_diff` | gate |
+| --- | ---: | ---: | --- | --- |
+| all three fused | 1.0 (all 6 checks) | 0.0 (all 6) | 0.64, 0.70, 0.72, 0.66, **1.26**, 1.03 | failed on the 1.26 |
+| all three off | 1.0 (all 6 checks) | 0.0 (all 6) | 0.52, 0.72, 0.92, 0.85, 1.18, **1.55** | failed on the 1.55 |
+
+The decode fields are exact in both runs, which is the claim this section makes.
+The gate still reports `failed`, and it does so **with the fusions off as well**,
+worse: 1.55 against 1.26. The failing field is `prefill_max_logit_diff`, the
+last-position distance between the optimized and naive *prefill* paths, which
+`check_decode_parity.py` shows these changes do not touch (0 of 66,191,360 prefill
+logits differ with them on versus off). It is the pre-existing `atomic_add`
+nondeterminism described in [Noise floor](#noise-floor), whose own run-to-run
+spread is 8-16 over the whole prompt, sitting against a 1.25 bound on a
+single-position sample. Both runs are kept in `results/` rather than only the
+passing one.
 
 ## Prefill changes
 
@@ -677,6 +811,15 @@ script does not gate those fields. The earlier saved full-prompt report is marke
 failed, and one of its last-position differences also exceeds 1.25. A later
 change to the script's checks does not make that saved report pass.
 
+That bound is marginal on a single sample, and the decode-fusion pass measured it
+both ways: with three decode fusions on, the worst last-position difference was
+1.26; with all three off, 1.55. Both runs are marked failed
+(`results/decode-fusion-e2e.json`, `results/decode-fusion-e2e-off.json`), and the
+fusions do not touch prefill at all — 0 of 66,191,360 prefill logits differ with
+them on versus off. The gate's prefill criterion should be read as a noisy
+single-position sample, not as a pass/fail signal for a decode change. See
+[Decode kernel fusion](#decode-kernel-fusion).
+
 The practical consequence: agreement at one position is insufficient evidence
 that two prefill paths agree. `check_placement.py` and `check_hc_mixes.py` also
 compare repeated runs of the same configuration, but those controls do not
@@ -686,13 +829,28 @@ replace full-model correctness checks.
 
 `benchmark_ds41f.py`'s parity gate compares its two arms inside one process. That
 catches kernel-level drift, but it cannot catch a change that both arms share, and
-its prefill criterion is a single prompt position. Four checks cover those gaps:
+its prefill criterion is a single prompt position. Five checks cover those gaps:
 
 - `check_placement.py` compares the same prompt before and after applying a
   placement. Placement moves logits by at most 0.71, while two identical runs
   already differ by at most 0.85. The sampled token is identical.
+- `check_decode_parity.py` compares a flag's on and off arms directly, which is
+  what "did this change the output" means: the benchmark harness compares its two
+  arms, so a kernel that sits in *both* arms passes it. It reports prefill logits
+  over every prompt position and per-step decode logits and tokens, and pins
+  `DSV41F_PF_FIXED_ORDER=1` so the pre-existing prefill nondeterminism does not
+  drown the comparison. Its `--same` control runs the flag off in both arms: on a
+  clean harness that reports 0 differing logits and 0 differing tokens, and it is
+  how the previous snapshot-restore harness was found to be comparing two
+  different decode states rather than two flags.
+- `check_rms_norm.py`, `check_moe_swiglu_exact.py` and `check_hc_exact.py` assert
+  the fused kernels are bit-identical to their reference expressions at bf16
+  output, over random draws plus inputs chosen to land on the clamp and rounding
+  boundaries. `probe_rsqrt.py` and `probe_swiglu_steps.py` are the isolation
+  probes that located the `tl.exp`/`tl.sqrt`/division differences behind the first
+  non-exact attempts.
 - `check_hc_exact.py` asserts the fused `hc_pre` and `hc_post` are bit-identical
-  to the reference expression at bf16 output.
+  to the reference expression at bf16 output, including at `s=1`.
 - `check_hc_mixes.py` measures a candidate change against the same-configuration
   noise floor at the same length, instead of against the fixed gate. It was used
   to choose between the `hc_mixes` dot modes and to gate the fused path.
@@ -799,9 +957,28 @@ $PY --nproc-per-node 4 check_fixed_order_prefill.py --length 8192 --reps 2 --tim
 # serving dispatch of the pinned placement, on every rank
 cd ../serve && $PY --nproc-per-node 4 verify_placement_dispatch.py --ckpt /data/ds41f/DSV41F-TP4 && cd ../inference
 
+# decode fusion: interleaved A/B of one flag (or several, comma-separated) inside
+# one process. Re-prefills per arm; pin the prefill or the arms differ for reasons
+# unrelated to the flag.
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _RMSNORM_FUSED --repeats 3
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py \
+  --flag _RMSNORM_FUSED,_HC_FUSED_DECODE,moe_kernels._MOE_SWIGLU_FUSED --repeats 3
+
+# bitwise on/off comparison, and the control that validates the harness itself
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py --flag _RMSNORM_FUSED --steps 64
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py --flag _HC_FUSED_DECODE --steps 64 --same
+
+# kernel-level exactness against the reference expression (one GPU)
+CUDA_VISIBLE_DEVICES=0 python check_rms_norm.py 200 3
+CUDA_VISIBLE_DEVICES=0 python check_moe_swiglu_exact.py
+CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
+CUDA_VISIBLE_DEVICES=0 python probe_rsqrt.py
+CUDA_VISIBLE_DEVICES=0 python probe_swiglu_steps.py
+
 # component profiles
 $PY --nproc-per-node 4 profile_prefill.py
 $PY --nproc-per-node 4 profile_decode.py
+python analyze_decode_trace.py /data/ds41f/decode_trace_rank0.json --steps 20 --top 20
 $PY --nproc-per-node 4 profile_prefill_ops.py
 $PY --nproc-per-node 4 diag_balance.py
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 profile_engram.py

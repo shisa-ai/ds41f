@@ -1,0 +1,371 @@
+{
+  "status": "failed",
+  "world_size": 4,
+  "decode_steps": 32,
+  "rows": [
+    {
+      "length": 512,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 3.4132035220973194,
+      "prefill_tok_s": 150.00570481229028,
+      "decode_ms": 211.41600334522082,
+      "decode_tok_s": 4.7300108987828215
+    },
+    {
+      "length": 512,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 0.3776902500540018,
+      "prefill_tok_s": 1355.6081999119508,
+      "decode_ms": 28.366029597236775,
+      "decode_tok_s": 35.25343568341384
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 0.38276893203146756,
+      "prefill_tok_s": 1337.6216227442103,
+      "decode_ms": 29.80708022369072,
+      "decode_tok_s": 33.5490760079613
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 3.422568392008543,
+      "prefill_tok_s": 149.5952575251627,
+      "decode_ms": 210.19490045000566,
+      "decode_tok_s": 4.757489348500382
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 4.98503816802986,
+      "prefill_tok_s": 410.8293519464449,
+      "decode_ms": 210.74379766650964,
+      "decode_tok_s": 4.745098128972908
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 0.7987503670156002,
+      "prefill_tok_s": 2564.0050816527523,
+      "decode_ms": 28.543187130708247,
+      "decode_tok_s": 35.0346299949156
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 0.8088948908261955,
+      "prefill_tok_s": 2531.8493456031074,
+      "decode_ms": 28.57817994663492,
+      "decode_tok_s": 34.991731519198794
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 4.986907502869144,
+      "prefill_tok_s": 410.67535317663567,
+      "decode_ms": 209.89414840732934,
+      "decode_tok_s": 4.764306235252248
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": false,
+      "prefill_s": 8.168454229133204,
+      "prefill_tok_s": 1002.8825246743526,
+      "decode_ms": 210.68890263995854,
+      "decode_tok_s": 4.746334465032917
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "optimized": true,
+      "prefill_s": 2.4274403860326856,
+      "prefill_tok_s": 3374.748169774289,
+      "decode_ms": 28.46025269536767,
+      "decode_tok_s": 35.13672245653549
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": true,
+      "prefill_s": 2.43193237693049,
+      "prefill_tok_s": 3368.5147159970334,
+      "decode_ms": 28.56251253251685,
+      "decode_tok_s": 35.010925557111094
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "optimized": false,
+      "prefill_s": 8.142298487946391,
+      "prefill_tok_s": 1006.1041132460552,
+      "decode_ms": 209.55585585761582,
+      "decode_tok_s": 4.7719974033054795
+    }
+  ],
+  "decode_state": "same GPU-buffer snapshot per comparison; cold prefill timed independently",
+  "source_sha256": {
+    "model.py": "1180b9659f2836462dc7d451eb228e783b5828c80eb8c23c168ef4ba03f2b950",
+    "grouped_moe.py": "2ffa733e32d98269663e2e640371aa220e3f8603a57412e99baaf34844387dd5",
+    "kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+    "kernel.py": "5efd129db63ccdae20ba3dafb9dee88a406c8017552f9f0f14f9c21668962fe2",
+    "benchmark_ds41f.py": "eec055ed25512fd513dc6b453dedbf32e23ec8c6a3e76817226ebd28ae66385e"
+  },
+  "manifest": {
+    "created_at": "2026-09-13T20:55:56+0800",
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "DSV41F_ENGRAM_OFFLOAD": "1",
+      "OMP_NUM_THREADS": "1"
+    },
+    "runtime": {
+      "python": "3.12.14",
+      "torch": "2.14.0+cu130",
+      "triton": "3.8.0",
+      "tilelang": "0.1.8",
+      "cuda": "13.0",
+      "device_count": 4,
+      "device_names": [
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e",
+        "NVIDIA H20-3e"
+      ],
+      "nccl": "2.30.7"
+    },
+    "sources": {
+      "model.py": "1180b9659f2836462dc7d451eb228e783b5828c80eb8c23c168ef4ba03f2b950",
+      "grouped_moe.py": "2ffa733e32d98269663e2e640371aa220e3f8603a57412e99baaf34844387dd5",
+      "kernel_gemv.py": "20df985181dc4a047af8d5805fa8b1fd26be7d96ae99a4e94105ee51e6100eee",
+      "kernel.py": "5efd129db63ccdae20ba3dafb9dee88a406c8017552f9f0f14f9c21668962fe2",
+      "benchmark_ds41f.py": "eec055ed25512fd513dc6b453dedbf32e23ec8c6a3e76817226ebd28ae66385e"
+    },
+    "engine_repo": {
+      "path": "/root/ds41f",
+      "available": true,
+      "revision": "5ccbd5f809ccd8b0e98a433a86f10a9f5dcbe791",
+      "branch": "main",
+      "dirty": true,
+      "dirty_paths": [
+        "M .gitignore",
+        " M docs/OPTIMIZE-RESULTS.md",
+        " M docs/OPTIMIZE.md",
+        "?? results/ab-combined-decode-fusion.json",
+        "?? results/ab-hc-fused-decode.json",
+        "?? results/ab-moe-swiglu-fused.json",
+        "?? results/ab-rmsnorm-fused.json",
+        "?? results/ab-rmsnorm-onepass.json",
+        "?? results/check-served-broadcast.log",
+        "?? results/collectives-custom-graphed.log",
+        "?? results/collectives-flashinfer.log",
+        "?? results/decode-fusion-e2e.json",
+        "?? results/decode-trace-fusion.txt",
+        "?? results/fixed-order-prefill-2048.log",
+        "?? results/fixed-order-prefill-8192.log",
+        "?? results/token-broadcast.json",
+        "?? results/token-broadcast.log",
+        "?? results/verify-placement-dispatch.log"
+      ]
+    },
+    "model_repo": {
+      "path": "/root/glm-testing",
+      "available": true,
+      "revision": "95a5e30d10f106cfc2cb93894c5458abb93bd50e",
+      "branch": "main",
+      "dirty": true,
+      "dirty_paths": [
+        "M ds41f/inference/benchmark_ds41f.py",
+        " M ds41f/inference/check_hc_exact.py",
+        " M ds41f/inference/grouped_moe.py",
+        " M ds41f/inference/model.py",
+        "?? ds41f/inference/analyze_decode_trace.py",
+        "?? ds41f/inference/bench_ab.py",
+        "?? ds41f/inference/check_decode_parity.py",
+        "?? ds41f/inference/check_moe_swiglu_exact.py",
+        "?? ds41f/inference/check_rms_norm.py",
+        "?? ds41f/inference/moe_kernels.py",
+        "?? ds41f/inference/norm_kernels.py",
+        "?? ds41f/inference/probe_rsqrt.py",
+        "?? ds41f/inference/probe_swiglu_steps.py"
+      ]
+    },
+    "config": {
+      "path": "/root/glm-testing/ds41f/inference/config.json",
+      "bytes": 1982,
+      "mtime": 1789024904.0792656,
+      "sha256": "2e84f45cf1dac8c7fcbb200e96667d4b913275690668ed496f24c7747207a809",
+      "sha256_scope": "full"
+    },
+    "checkpoint": {
+      "path": "/data/ds41f/DSV41F-TP4",
+      "files": {
+        "model0-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model0-mp4.safetensors",
+          "bytes": 130673094032,
+          "mtime": 1789028806.128312,
+          "sha256": "8e4ca03d9bfeecd9ad096b66e87e5ef769523a2650b26b0c3624f231b7b49e39",
+          "sha256_scope": "safetensors_header_2839808_bytes"
+        },
+        "model1-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model1-mp4.safetensors",
+          "bytes": 130673118696,
+          "mtime": 1789028876.5222774,
+          "sha256": "2cb4aef9cbd53b543e7e7bc7497620435dfd9a9adf9abda5247c56a14ad77659",
+          "sha256_scope": "safetensors_header_2864472_bytes"
+        },
+        "model2-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model2-mp4.safetensors",
+          "bytes": 130673119656,
+          "mtime": 1789028953.1982393,
+          "sha256": "8f83da505f553a08b8db3bb873aa1a5d57839b0b16e04f5f9ff9d87e92ba5ed0",
+          "sha256_scope": "safetensors_header_2865432_bytes"
+        },
+        "model3-mp4.safetensors": {
+          "path": "/data/ds41f/DSV41F-TP4/model3-mp4.safetensors",
+          "bytes": 130673120160,
+          "mtime": 1789029027.7612016,
+          "sha256": "d7110b9c1040ec15a5c051e23ef998f1fd38e92f7ef1e2ad51c8e3b901b07096",
+          "sha256_scope": "safetensors_header_2865936_bytes"
+        },
+        "tokenizer.json": {
+          "path": "/data/ds41f/DSV41F-TP4/tokenizer.json",
+          "bytes": 6367257,
+          "mtime": 1789029027.7782016,
+          "sha256": "462d744d52ec66501066d2fadcd5e25e2706dcae6518d7c45b1c54f785016be0",
+          "sha256_scope": "first_1048576_bytes"
+        },
+        "tokenizer_config.json": {
+          "path": "/data/ds41f/DSV41F-TP4/tokenizer_config.json",
+          "bytes": 801,
+          "mtime": 1789029027.7792015,
+          "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+          "sha256_scope": "first_1048576_bytes"
+        }
+      }
+    },
+    "placement": {
+      "path": "/root/glm-testing/ds41f/inference/expert_placement.pt",
+      "sha256": "e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030",
+      "bytes": 248567,
+      "keys": [
+        "balanced_max_over_ideal",
+        "current_max_over_ideal",
+        "loads",
+        "new_to_old"
+      ],
+      "layers": 40,
+      "experts": 384,
+      "valid_permutation": true,
+      "invalid_layers": []
+    }
+  },
+  "parity": [
+    {
+      "length": 512,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 12.321478843688965,
+      "prefill_top1_agreement_full": 0.83984375,
+      "prefill_max_logit_diff": 0.6377249956130981,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 512,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 12.321478843688965,
+      "prefill_top1_agreement_full": 0.80859375,
+      "prefill_max_logit_diff": 0.7010481357574463,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 16.11829376220703,
+      "prefill_top1_agreement_full": 0.8046875,
+      "prefill_max_logit_diff": 0.7179449796676636,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 2048,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 16.11829376220703,
+      "prefill_top1_agreement_full": 0.8076171875,
+      "prefill_max_logit_diff": 0.6611108779907227,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 15.691231727600098,
+      "prefill_top1_agreement_full": 0.761474609375,
+      "prefill_max_logit_diff": 1.2627475261688232,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    },
+    {
+      "length": 8192,
+      "repeat": 1,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 15.691231727600098,
+      "prefill_top1_agreement_full": 0.752197265625,
+      "prefill_max_logit_diff": 1.0322061777114868,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ],
+  "failed_check": {
+    "length": 8192,
+    "repeat": 0,
+    "top1_agreement": 1.0,
+    "prefill_top1_agreement": 1.0,
+    "prefill_max_logit_diff_full": 15.691231727600098,
+    "prefill_top1_agreement_full": 0.761474609375,
+    "prefill_max_logit_diff": 1.2627475261688232,
+    "max_logit_diff": 0.0,
+    "mean_kl": 0.0,
+    "max_kl": 0.0
+  },
+  "parity_failures": [
+    {
+      "length": 8192,
+      "repeat": 0,
+      "top1_agreement": 1.0,
+      "prefill_top1_agreement": 1.0,
+      "prefill_max_logit_diff_full": 15.691231727600098,
+      "prefill_top1_agreement_full": 0.761474609375,
+      "prefill_max_logit_diff": 1.2627475261688232,
+      "max_logit_diff": 0.0,
+      "mean_kl": 0.0,
+      "max_kl": 0.0
+    }
+  ]
+}

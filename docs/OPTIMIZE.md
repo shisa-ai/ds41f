@@ -229,6 +229,32 @@ and synchronized decode produce identical tokens once prefill is deterministic �
 but the delivery path must enqueue step *i+1* before reading step *i*'s token. See
 [Decode step budget](OPTIMIZE-RESULTS.md#decode-step-budget).
 
+**First fusion pass (September 13).** Three of the chains named above are now
+fused: RMSNorm, the hyper-connection pre/post mixers, and the MoE SwiGLU+clamp+
+route-weight. **6,232 → 4,558 launches/step (−27%), decode +11.91%**
+(32.599 → 28.716 ms at B=1, 2K, worst rank, three interleaved repeats), with
+**bit-identical decode tokens**. Each change is guarded by a bit-exactness check
+against its reference expression, not by the benchmark harness's parity gate: that
+gate compares its two arms, so a kernel present in both arms passes it.
+
+Two findings from that pass constrain the rest of the section:
+
+- **Triton's `tl.exp` and `tl.sqrt` are not `expf`/`sqrtf`.** The first single-kernel
+  SwiGLU differed from `torch.exp` on 55,722 of 82,944 inputs; `tl.math.rsqrt` and
+  `libdevice.exp` are bit-identical. Any further fusion has to check this.
+- **`torch.mean`'s reduction order is not reproducible in a kernel** (three
+  reduction shapes tried, none agree). The fused RMSNorm therefore keeps torch's
+  `mean` and fuses only around it, which is why it is two kernels and not one. A
+  one-kernel variant is 2.97% faster and is off by default at ~5 differing bf16
+  elements per million.
+
+Still unfused and named by this section: RoPE, the KV-cache writes, and
+`hc_mixes` at decode (its fused kernel is shaped one program per 64 tokens, so it
+needs a decode-shaped variant). The remaining small-kernel groups are 2,774
+elementwise/copy/reduce plus 410 activation-quantization launches per step; the
+`act_quant` group is now the largest single fusion target at 1.05 ms/step. See
+[Decode kernel fusion](OPTIMIZE-RESULTS.md#decode-kernel-fusion).
+
 ## 4. Remove cohort waste and sampling synchronization
 
 These serving-path issues are absent from the B=1 teacher-forced kernel benchmark.

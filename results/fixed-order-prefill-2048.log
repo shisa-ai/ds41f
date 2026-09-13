@@ -1,0 +1,60 @@
+W0913 16:11:30.744000 1343109 site-packages/torch/distributed/run.py:982] 
+W0913 16:11:30.744000 1343109 site-packages/torch/distributed/run.py:982] *****************************************
+W0913 16:11:30.744000 1343109 site-packages/torch/distributed/run.py:982] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0913 16:11:30.744000 1343109 site-packages/torch/distributed/run.py:982] *****************************************
+/root/glm-testing/ds41f/inference/check_fixed_order_prefill.py:69: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_fixed_order_prefill.py:69: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_fixed_order_prefill.py:69: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+/root/glm-testing/ds41f/inference/check_fixed_order_prefill.py:69: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+  torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+  [placement] file=/root/glm-testing/ds41f/inference/expert_placement.pt sha256=e8cab35b81bc175e893cd713780783794236bf6a7d951b0d1405a12a69740030 layers=40 experts=384
+  [placement] layer 0 redistributed
+  [placement] layer 1 redistributed
+  [placement] layer 2 redistributed
+  [placement] layer 3 redistributed
+  [placement] layer 4 redistributed
+  [placement] layer 5 redistributed
+  [placement] layer 6 redistributed
+  [placement] layer 7 redistributed
+  [placement] layer 8 redistributed
+  [placement] layer 9 redistributed
+  [placement] layer 10 redistributed
+  [placement] layer 11 redistributed
+  [placement] layer 12 redistributed
+  [placement] layer 13 redistributed
+  [placement] layer 14 redistributed
+  [placement] layer 15 redistributed
+  [placement] layer 16 redistributed
+  [placement] layer 17 redistributed
+  [placement] layer 18 redistributed
+  [placement] layer 19 redistributed
+  [placement] layer 20 redistributed
+  [placement] layer 21 redistributed
+  [placement] layer 22 redistributed
+  [placement] layer 23 redistributed
+  [placement] layer 24 redistributed
+  [placement] layer 25 redistributed
+  [placement] layer 26 redistributed
+  [placement] layer 27 redistributed
+  [placement] layer 28 redistributed
+  [placement] layer 29 redistributed
+  [placement] layer 30 redistributed
+  [placement] layer 31 redistributed
+  [placement] layer 32 redistributed
+  [placement] layer 33 redistributed
+  [placement] layer 34 redistributed
+  [placement] layer 35 redistributed
+  [placement] layer 36 redistributed
+  [placement] layer 37 redistributed
+  [placement] layer 38 redistributed
+  [placement] layer 39 redistributed
+  [placement] applied /root/glm-testing/ds41f/inference/expert_placement.pt
+[rank 2] {"length": 2048, "rank": 2, "reps": 2, "atomic_vs_atomic": {"max": 11.56612491607666, "top1": 0.7578125, "first_diff_pos": 8}, "fixed_vs_fixed": {"max": 0.0, "top1": 1.0, "first_diff_pos": -1}, "fixed_vs_atomic": {"max": 9.201132774353027, "top1": 0.7763671875, "first_diff_pos": 1}, "atomic_first_diff_block": 0, "fixed_first_diff_block": -1, "routing_atomic_first_diff_moe_layer": 3, "routing_fixed_first_diff_moe_layer": -1, "routing_fixed_vs_atomic_first_diff_moe_layer": 2, "fixed_temp_GiB": 0.234375, "atomic_peak_GiB": 75.70174026489258, "fixed_peak_GiB": 75.70174026489258, "peak_delta_GiB": 0.0, "atomic_min_ms": 784.5173988025635, "fixed_min_ms": 795.846528140828, "fixed_overhead_ms": 11.329129338264465}[rank 0] {"length": 2048, "rank": 0, "reps": 2, "atomic_vs_atomic": {"max": 11.56612491607666, "top1": 0.7578125, "first_diff_pos": 8}, "fixed_vs_fixed": {"max": 0.0, "top1": 1.0, "first_diff_pos": -1}, "fixed_vs_atomic": {"max": 9.201132774353027, "top1": 0.7763671875, "first_diff_pos": 1}, "atomic_first_diff_block": 0, "fixed_first_diff_block": -1, "routing_atomic_first_diff_moe_layer": 3, "routing_fixed_first_diff_moe_layer": -1, "routing_fixed_vs_atomic_first_diff_moe_layer": 2, "fixed_temp_GiB": 0.234375, "atomic_peak_GiB": 75.70174026489258, "fixed_peak_GiB": 75.70174026489258, "peak_delta_GiB": 0.0, "atomic_min_ms": 784.5671428367496, "fixed_min_ms": 795.8508958108723, "fixed_overhead_ms": 11.283752974122763}[rank 1] {"length": 2048, "rank": 1, "reps": 2, "atomic_vs_atomic": {"max": 11.56612491607666, "top1": 0.7578125, "first_diff_pos": 8}, "fixed_vs_fixed": {"max": 0.0, "top1": 1.0, "first_diff_pos": -1}, "fixed_vs_atomic": {"max": 9.201132774353027, "top1": 0.7763671875, "first_diff_pos": 1}, "atomic_first_diff_block": 0, "fixed_first_diff_block": -1, "routing_atomic_first_diff_moe_layer": 3, "routing_fixed_first_diff_moe_layer": -1, "routing_fixed_vs_atomic_first_diff_moe_layer": 2, "fixed_temp_GiB": 0.234375, "atomic_peak_GiB": 75.70174026489258, "fixed_peak_GiB": 75.70174026489258, "peak_delta_GiB": 0.0, "atomic_min_ms": 784.4795710407197, "fixed_min_ms": 795.8244299516082, "fixed_overhead_ms": 11.344858910888433}
+
+
+[rank 3] {"length": 2048, "rank": 3, "reps": 2, "atomic_vs_atomic": {"max": 11.56612491607666, "top1": 0.7578125, "first_diff_pos": 8}, "fixed_vs_fixed": {"max": 0.0, "top1": 1.0, "first_diff_pos": -1}, "fixed_vs_atomic": {"max": 9.201132774353027, "top1": 0.7763671875, "first_diff_pos": 1}, "atomic_first_diff_block": 0, "fixed_first_diff_block": -1, "routing_atomic_first_diff_moe_layer": 3, "routing_fixed_first_diff_moe_layer": -1, "routing_fixed_vs_atomic_first_diff_moe_layer": 2, "fixed_temp_GiB": 0.234375, "atomic_peak_GiB": 75.70174026489258, "fixed_peak_GiB": 75.70174026489258, "peak_delta_GiB": 0.0, "atomic_min_ms": 784.5607581548393, "fixed_min_ms": 795.8514229394495, "fixed_overhead_ms": 11.290664784610271}
+/root/miniforge3/envs/ds41f/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
