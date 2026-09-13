@@ -1,0 +1,139 @@
+{
+  "nccl_version": [
+    2,
+    30,
+    7
+  ],
+  "algo_env": {},
+  "rows": [
+    {
+      "name": "decode_moe_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.030748429708182812,
+      "min_ms": 0.029243063181638718,
+      "algbw_GBs": 0.7003370294278571,
+      "busbw_GBs": 1.0505055441417857,
+      "graph_median_ms": 0.022170948795974255,
+      "graph_min_ms": 0.02164696343243122,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "decode_moe_bf16",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 0.01024,
+      "median_ms": 0.03041699528694153,
+      "min_ms": 0.028475886210799217,
+      "algbw_GBs": 0.35960250452597237,
+      "busbw_GBs": 0.5394037567889586,
+      "graph_median_ms": 0.020352075807750225,
+      "graph_min_ms": 0.019415980204939842,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "decode_attn_f32",
+      "shape": [
+        1,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 0.02048,
+      "median_ms": 0.030765892006456852,
+      "min_ms": 0.02935505472123623,
+      "algbw_GBs": 0.6976651958064388,
+      "busbw_GBs": 1.0464977937096582,
+      "graph_median_ms": 0.021561048924922943,
+      "graph_min_ms": 0.020971056073904037,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "prefill_attn_f32",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 167.77216,
+      "median_ms": 0.782850431278348,
+      "min_ms": 0.7726319599896669,
+      "algbw_GBs": 217.14369672495008,
+      "busbw_GBs": 325.7155450874251,
+      "graph_median_ms": 0.7707044715061784,
+      "graph_min_ms": 0.7651119958609343,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "prefill_attn_bf16",
+      "shape": [
+        8192,
+        5120
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 83.88608,
+      "median_ms": 0.4139050142839551,
+      "min_ms": 0.404988881200552,
+      "algbw_GBs": 207.13181001741947,
+      "busbw_GBs": 310.69771502612923,
+      "graph_median_ms": 0.40362204890698195,
+      "graph_min_ms": 0.3973089624196291,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "prefill_mid_f32",
+      "shape": [
+        2048,
+        5120
+      ],
+      "dtype": "torch.float32",
+      "MB": 41.94304,
+      "median_ms": 0.23082946427166462,
+      "min_ms": 0.22512394934892654,
+      "algbw_GBs": 186.31087505928207,
+      "busbw_GBs": 279.4663125889231,
+      "graph_median_ms": 0.2197885187342763,
+      "graph_min_ms": 0.2161320298910141,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "engram_bf16",
+      "shape": [
+        8192,
+        256
+      ],
+      "dtype": "torch.bfloat16",
+      "MB": 4.194304,
+      "median_ms": 0.05874352063983679,
+      "min_ms": 0.05719298496842384,
+      "algbw_GBs": 73.33598696266104,
+      "busbw_GBs": 110.00398044399157,
+      "graph_median_ms": 0.04885613452643156,
+      "graph_min_ms": 0.04779198206961155,
+      "custom_error": "unavailable"
+    },
+    {
+      "name": "indexer_f32",
+      "shape": [
+        8192,
+        512
+      ],
+      "dtype": "torch.float32",
+      "MB": 16.777216,
+      "median_ms": 0.11422147508710623,
+      "min_ms": 0.10979315266013145,
+      "algbw_GBs": 152.807489297028,
+      "busbw_GBs": 229.211233945542,
+      "graph_median_ms": 0.10415702126920223,
+      "graph_min_ms": 0.10171509347856045,
+      "custom_error": "unavailable"
+    }
+  ],
+  "custom_error": "ModuleNotFoundError(\"No module named 'vllm'\")"
+}

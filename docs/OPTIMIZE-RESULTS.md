@@ -1,6 +1,9 @@
 # Optimization results
 
-What was implemented from [OPTIMIZE.md](OPTIMIZE.md), and what it measured.
+A tuning pass over [OPTIMIZE.md](OPTIMIZE.md): what was implemented, what it
+measured, and what is still open. It is **not** a complete implementation of that
+list — see [Scope and status](#scope-and-status) before reading the numbers as a
+progress figure.
 
 All numbers come from `benchmark_ds41f.py` on GPU0-3 (4 x H20-3e, TP=4) with
 `DSV41F_ENGRAM_OFFLOAD=1`. That harness alternates the two arms, restores a
@@ -11,6 +14,25 @@ These are single-host measurements, not a controlled speedup claim. They are
 comparable to each other because the checkpoint, GPU set and harness are fixed;
 they are not comparable to the vLLM figures in OPTIMIZE.md, which used a
 different protocol.
+
+## Scope and status
+
+Done and measured: the decode kernel work (FP8 GEMV, warp counts), the prefill
+MoE work (sync-free histogram, flat tile grid, load-balanced expert placement),
+the fused hyper-connection kernels, and two serving-path fixes (symmetric length
+bucketing, batched on-device sampling).
+
+Not done, in rough order of expected impact:
+
+| Item | State |
+| --- | --- |
+| Marlin / FP4-expert kernel comparison | Not attempted. The format qualification was part of the experiment, not a reason to call it complete. |
+| Matched vLLM autoregressive baseline | Missing. The historical vLLM and current engine numbers use different protocols, so the gap is unquantified. |
+| Graph coverage beyond B=1 | The segmented step-graph path requires input shape exactly `(1, 1)`. B=2/4/8 serving gains are unqualified. |
+| Engram lookup cost | Unmeasured. The graphed decode wrapper still runs Engram outside replay with a synchronous index transfer to CPU and a CPU gather/dequantize. |
+| DSpark feasibility spike | Deferred wholesale, including the early spike. |
+| Custom / symmetric-memory collectives | Not measured. NCCL only; see [Collectives](#collectives). |
+| Deterministic prefill | Not attempted. See [Noise floor](#noise-floor). |
 
 ## Results
 
@@ -25,6 +47,12 @@ different protocol.
 Before is `results/baseline-gpu0123.json`, the same harness on the same GPU set
 before any of this work. After is `results/trusted-shipped.json`; both are the
 mean of two repeats, and the two repeats are within 1.5% of each other.
+
+The decode row is the well-supported number: it is measured on a path whose two
+arms are compared from the same restored state, so the comparison isolates the
+decode kernels. The prefill rows are less well supported — see
+[Noise floor](#noise-floor) and [What the harness does and does not
+show](#what-the-harness-does-and-does-not-show).
 
 Every parity criterion passes on every row: `top1_agreement` 1.0,
 `prefill_top1_agreement` 1.0, `max_logit_diff` 0.0, and
@@ -177,6 +205,10 @@ full-prompt measurement shows is that the fused path's deviation is inside the
 same-configuration noise floor at both lengths, which is the strongest evidence
 available here. Enable it if the 3% matters; it is a judgement call, not a defect.
 
+Note that this kernel sits in **both** harness arms, so the harness's parity gate
+cannot see it either way — the same is true of every change in this document
+except the two flags the arms toggle.
+
 ## Serving-path changes
 
 `ds41f/src/ds41f/scheduler/scheduler.py` enforced only an upper length bound
@@ -200,6 +232,54 @@ so they are gone and the claim now holds.
 These are covered by 54 engine tests (`python -m pytest tests/` in the engine
 repository), 17 of them new. The scheduler and sampling changes are not visible in
 `benchmark_ds41f.py`, which measures model-only prefill and decode.
+
+## Collectives
+
+`bench_collectives.py` times NCCL `all_reduce` at the engine's real shapes, eager
+and under CUDA-graph replay (`results/collectives-*.json`). For the 168 MB
+prefill reduction NCCL reaches 325 GB/s bus bandwidth, and the measured 9.4 ms per
+call was rank waiting rather than transport, which the expert placement removed
+(0.491 s -> 0.100 s). For the 20 KB decode reduction every NCCL
+algorithm/protocol combination sits at ~31 us eager and ~21 us graphed, which is
+launch latency rather than transport, so no NCCL algorithm choice helps.
+
+**No alternative backend was measured.** The script's `--custom` flag used to
+construct vLLM's `CustomAllreduce` and print `car.disabled`, establishing
+availability and nothing else; the writeup then described alternatives as
+benchmarked, which was not supported. It now times the communicator per shape and
+checks the result against NCCL (`custom_min_ms`, `custom_speedup`,
+`custom_error`), but vLLM is not installed in this environment, so every row
+records `custom_error: "unavailable"` and the comparison remains open. FlashInfer
+and a symmetric-memory path are not implemented at all. The claim that similar
+NCCL latency rules out other backends is not established: at 20 KB the cost is
+launch overhead, which a different backend could plausibly reduce.
+
+## What the harness does and does not show
+
+`benchmark_ds41f.py` compares two arms inside one process, and the decode portion
+of each arm starts from a snapshot of the same reference-generated buffers
+(`snapshot = [(b, b.clone()) for b in model.buffers()]`, restored before both
+arms). That is deliberate: it isolates the decode kernels from prefill-state
+differences. It also means the harness's exact decode parity says nothing about
+whether the optimized prefill produced a correct state.
+
+The arms toggle `_GROUPED_MOE` and `_STEP_GRAPHS`. Every other change in this
+document — the fused hyper-connections, the fused `hc_mixes`, the FP8 GEMV
+default, the warp counts, the histogram, the tile grid — is in **both** arms and
+therefore invisible to this gate. For those, the evidence is:
+
+- `check_hc_exact.py`: the fused `hc_pre`/`hc_post` are bit-identical to the
+  reference expression at bf16 output.
+- `check_placement.py`: placement moves logits by at most 0.71 against a
+  same-configuration spread of 0.85, with an identical sampled token.
+- `check_hc_mixes.py` and `check_prefill_parity.py`: the deviation of a candidate
+  change against the same-configuration noise floor.
+
+What none of that establishes: independent prefill-state equivalence (the whole
+prompt, not one position), exact expert-routing agreement, or quality on
+representative natural-generation prompts. Random-token prompts are not a quality
+test, and no held-out task evaluation was run. Those are the missing evidence the
+correctness gates in OPTIMIZE.md ask for.
 
 ## Noise floor
 
@@ -261,6 +341,11 @@ its prefill criterion is a single prompt position. Four checks cover those gaps:
   measurement benefit rather than a throughput one.
 - **Marlin kernel comparison (OPTIMIZE.md section 1).** Not attempted. It needs
   the vLLM Marlin kernels vendored and qualified against E2M1/E8M0 semantics.
+  The FP8 GEMV/GEMM comparison in [Decode changes](#decode-changes) is a different
+  experiment and does not stand in for it.
+- **Engram lookup cost (section 6).** Unmeasured. The graphed decode wrapper still
+  executes Engram outside replay, with a synchronous index transfer to CPU and a
+  CPU gather/dequantize; what that currently costs was never profiled.
 - **`_PREFILL_BF16` expert weight tables.** Implemented and left off. It is not
   memory-feasible at this scale: exact dequantization of the local experts to
   bf16 needs roughly 4x the fp4 storage, about 290 GB per rank, against 141 GB
@@ -270,15 +355,16 @@ its prefill criterion is a single prompt position. Four checks cover those gaps:
   (2%). It selects experts, so changing its precision changes which experts run,
   not just the values. Not attempted; the same fused approach used for `hc_mixes`
   would apply, but the sensitivity is higher and the prize is smaller.
-- **Custom or symmetric-memory collectives (section 2).** Benchmarked
-  (`bench_collectives.py`) but not adopted. For the 168 MB prefill reduction
-  NCCL is at the transport limit; the measured 9.4 ms per call was rank waiting,
-  which the placement change removed. For the 20 KB decode reduction the NCCL
-  algorithms all sit at ~31 µs, which is launch latency rather than transport, so
-  no algorithm change helps.
+- **Custom or symmetric-memory collectives (section 2).** NCCL only; the custom
+  path is implemented in `bench_collectives.py` but vLLM is not installed here, so
+  it was not measured. See [Collectives](#collectives).
 - **DSpark integration (section 5), Engram GPU lookup (section 6), continuous
   admission (section 8), EP or pipeline topology (section 9).** Out of scope for
   this pass.
+- **B=2/4/8 graph coverage.** The step-graph path requires `(1, 1)` inputs.
+- **Independent prefill-state and routing validation, and natural-generation
+  quality.** See [What the harness does and does not
+  show](#what-the-harness-does-and-does-not-show).
 
 ## Reproducing
 
@@ -309,6 +395,10 @@ $PY --nproc-per-node 4 profile_prefill.py
 $PY --nproc-per-node 4 profile_decode.py
 $PY --nproc-per-node 4 profile_prefill_ops.py
 $PY --nproc-per-node 4 diag_balance.py
+
+# collectives; --custom needs vllm installed, and records per-shape custom_error
+# otherwise (every row here, since it is not installed in this environment)
+torchrun --nproc-per-node 4 bench_collectives.py --custom
 ```
 
 `expert_placement.pt` is a generated artifact and is not committed.
