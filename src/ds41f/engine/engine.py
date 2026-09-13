@@ -64,6 +64,21 @@ class LLMEngine:
         # delay grows linearly. Decode is untouched at every setting (c=1 ITL 28.67-28.78 ms).
         self._admit_window_s = float(os.environ.get("DS41F_ADMIT_WINDOW_MS", "0")) / 1000.0
         self._admit_deadline: Optional[float] = None
+        # Pipelined delivery. The serial loop calls execute() and then delivers, and
+        # execute() reads the sampled tokens on the host, so the host drains the GPU
+        # queue once per step and pays the ramp back up: 3.12 ms/step, 11% of a B=1
+        # decode step (probe_decode_cpu.py, 27.99 ms synchronized against 24.87 ms
+        # pipelined). Here step i is enqueued and step i-1's tokens are read at the
+        # top of the next iteration, so there is always work queued. Opt-in while it
+        # is being qualified: it changes when a token is read relative to the next
+        # step, and the exact-boundary snapshot capture has to be shown to survive
+        # that (the cache is one position ahead of the key when the hook fires, and
+        # the key names the prefix the snapshot is valid for, so the used region is
+        # unchanged -- but that is an argument, not a measurement, until
+        # serve/check_pipeline_parity.py runs on real weights).
+        self._pipeline = bool(int(os.environ.get("DS41F_PIPELINE", "0"))) and hasattr(
+            backend, "enqueue"
+        )
         self._thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
         # on_drain(cohort_requests) fires after a cohort fully drains and before the
@@ -132,12 +147,32 @@ class LLMEngine:
             raise
 
     def _run_inner(self) -> None:
+        pending = None
         while True:
             if self._dead.is_set():
                 return
             self._drain_control()
             if self._stopped.is_set():
+                if pending is not None:
+                    self._deliver(self._resolve(pending))
+                    pending = None
                 break
+            # A decode plan is the same row set whether or not some of those rows have
+            # finished, because a finished row keeps its place in the fixed cohort
+            # until the cohort drains. So the plan for step i can be built before step
+            # i-1's tokens are read, which is the whole point: step i is enqueued
+            # first, and only then does the host wait on step i-1's read, with step i
+            # already queued. Resolving first would put the host back in front of the
+            # GPU and give the overlap away.
+            #
+            # The one case where the plan really does depend on the pending step is
+            # when the cohort looks drained: then the next plan would be a prefill,
+            # which admits new rows and overwrites `_last_cohort` before the drained
+            # rows have been captured. Resolve in that case, so the drain capture and
+            # the new cohort's bookkeeping see the finished rows.
+            if pending is not None and not self._active:
+                self._deliver(self._resolve(pending))
+                pending = None
             # Hold a fresh, under-filled cohort open for the admission window. Waiting
             # here rather than inside the scheduler keeps `_admit` free of policy and
             # keeps the wait before any row is allocated, so there is nothing to undo.
@@ -176,6 +211,12 @@ class LLMEngine:
                     self.on_drain(self._last_cohort)
                 self._last_cohort = []
             if plan is None:
+                if pending is not None:
+                    # the in-flight step may be the one that drains the cohort; land it
+                    # and re-evaluate rather than idling with work in flight
+                    self._deliver(self._resolve(pending))
+                    pending = None
+                    continue
                 self._wakeup.clear()
                 if self._waiting or self._active or not self._control.empty():
                     # waiting but not admissible yet (e.g. cohort constraints); yield briefly
@@ -183,11 +224,34 @@ class LLMEngine:
                     continue
                 self._wakeup.wait(timeout=0.05)
                 continue
-            results = self.backend.execute(plan, self.state)
+            staged = self._enqueue(plan)
+            for row in plan.rows:
+                req = self._active.get(row.row.slot)
+                if req is not None and req.req_id == row.req_id:
+                    req.inflight += 1
             if plan.op == "prefill":
                 self._last_cohort = sorted(self._active.values(), key=lambda r: r.row_ref.slot)
-            self._deliver(results)
+            if self._pipeline:
+                # step i is enqueued and step i-1's read is only now waited on, so the
+                # GPU always has the next step queued while the host is blocked
+                if pending is not None:
+                    self._deliver(self._resolve(pending))
+                pending = staged
+            else:
+                self._deliver(self._resolve(staged))
         self._fail_remaining()
+
+    def _enqueue(self, plan):
+        """Start a step. A backend that only implements the `execute` protocol runs
+        the step outright and hands back results that are already resolved."""
+        if hasattr(self.backend, "enqueue"):
+            return self.backend.enqueue(plan, self.state)
+        return self.backend.execute(plan, self.state)
+
+    def _resolve(self, staged):
+        if hasattr(self.backend, "resolve"):
+            return self.backend.resolve(staged)
+        return staged
 
     def _drain_control(self) -> None:
         while True:
@@ -202,6 +266,8 @@ class LLMEngine:
     def _deliver(self, results) -> None:
         for res in results:
             req = self._active.get(self._slot_of(res.req_id))
+            if req is not None and req.req_id == res.req_id:
+                req.inflight -= 1
             if req is None or req.req_id != res.req_id:
                 continue
             if req.done:

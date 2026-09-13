@@ -21,11 +21,27 @@ class FakeBackend:
         self.executed: list[StepPlan] = []
 
     def execute(self, plan: StepPlan, state: StateStore) -> list[StepResult]:
+        return self.resolve(self.enqueue(plan, state))
+
+    def enqueue(self, plan: StepPlan, state: StateStore):
+        """Split step contract: the plan runs now, its results are resolved later.
+
+        The fake has no device work and no host read, so the handle is simply the
+        deferred result list. What the engine tests need from the split is that the
+        engine is allowed to hold one handle while it enqueues the next step, and
+        that is what this makes possible.
+        """
         import time
 
         if self.delay:
             time.sleep(self.delay)
         self.executed.append(plan)
+        return self._results(plan)
+
+    def resolve(self, pending) -> list[StepResult]:
+        return pending
+
+    def _results(self, plan: StepPlan) -> list[StepResult]:
         results = []
         for row in plan.rows:
             if plan.op == "prefill":

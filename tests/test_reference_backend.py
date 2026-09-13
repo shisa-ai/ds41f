@@ -480,3 +480,43 @@ def test_all_top_p_one_skips_the_sort_but_still_samples():
         return out
 
     assert draw(1.0) == draw(0.999999)
+
+
+def test_enqueue_then_resolve_matches_execute():
+    """The split step contract must be indistinguishable from the old one.
+
+    This is the CPU half of the check: the skeleton carries (req_id, position in
+    the read buffer) and the token values arrive separately, so an indexing slip
+    would swap or drop rows. The CUDA half -- that the pinned copy really is
+    ordered before the next step -- is exercised on real weights by
+    serve/check_pipeline_parity.py.
+    """
+    rows = make_prefill([2, 5, 5], max_new=3).rows
+    state = StateStore(4, 100)
+
+    serial = ReferenceBackend(StubModel(), eos_token_id=500)
+    split = ReferenceBackend(StubModel(), eos_token_id=500)
+
+    for step in range(4):
+        plan = make_prefill([2, 5, 5], max_new=3) if step == 0 else make_decode(rows)
+        a = serial.execute(plan, state)
+        b = split.resolve(split.enqueue(plan, state))
+        assert [(r.req_id, r.tokens, r.finish_reason) for r in a] == [
+            (r.req_id, r.tokens, r.finish_reason) for r in b
+        ], step
+
+
+def test_a_staged_step_can_be_held_while_another_is_enqueued():
+    """The engine holds step i's read while it enqueues step i+1. Two handles must
+    stay independent: the second enqueue must not disturb the first one's buffer."""
+    rows = make_prefill([3, 3], max_new=3).rows
+    state = StateStore(4, 100)
+    be = ReferenceBackend(StubModel(), eos_token_id=500)
+
+    prefill = be.enqueue(make_prefill([3, 3], max_new=3), state)
+    decode = be.enqueue(make_decode(rows), state)
+    # resolve out of order: the older handle is still valid after the newer enqueue
+    first = be.resolve(prefill)
+    second = be.resolve(decode)
+    assert [r.tokens for r in first] == [(103,), (103,)]
+    assert [r.tokens for r in second] == [(104,), (104,)]

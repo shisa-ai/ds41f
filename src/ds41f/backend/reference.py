@@ -22,11 +22,28 @@ The model object must expose the reference signature::
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from ..scheduler.scheduler import PlanRow, StepPlan
 from ..state.slots import StateStore
 from .base import StepResult
+
+@dataclass
+class _Staged:
+    """One step whose token read is in flight.
+
+    `skeleton` holds (req_id, position in the read buffer or None) per cohort row in
+    row order; None means the row emitted nothing this step. `pinned` is the host
+    buffer being filled and `event` marks the compute-stream point at which it is
+    valid; `event` is None when the read was already synchronous.
+    """
+
+    skeleton: list
+    pinned: object
+    event: object
+    count: int
+
 
 TEXT = -1  # token_type for text positions (matches image_processor.TEXT)
 DEVICE = "cuda"  # set by ReferenceBackend.__init__ (module-level default)
@@ -68,15 +85,46 @@ class ReferenceBackend:
         self._req_ids: list[int] = []
         self._prev_pos = 0
         self._cur_pos = 0
+        # Pinned staging for the asynchronous token read, double-buffered because
+        # the engine may hold one step's read in flight while the next is issued.
+        self._pin = [None, None]
+        self._pin_slot = 0
 
     # -- Backend protocol ---------------------------------------------------
 
     def execute(self, plan: StepPlan, state: StateStore) -> list[StepResult]:
+        return self.resolve(self.enqueue(plan, state))
+
+    def enqueue(self, plan: StepPlan, state: StateStore):
+        """Run one step and start reading its sampled tokens, without waiting.
+
+        Everything the step computes stays on the device: the forward, the
+        sampling draw and the token write-back into `_tokens`. The only host
+        interaction is a non-blocking copy of the sampled ids into a pinned
+        buffer, issued on the compute stream at the point the sampling kernel
+        retires -- which is *before* the next step is enqueued, so a later
+        blocking read of that buffer does not wait for the next step.
+
+        That ordering is the whole point. `sampled.tolist()` inside execute() is
+        a stream-ordered blocking copy, so calling it after enqueueing step i+1
+        would wait for step i+1: the host would still drain the pipeline, and the
+        exposed drain is 3.12 ms/step (probe_decode_cpu.py, 27.99 ms against
+        24.87 ms). Splitting enqueue from resolve is what lets the engine keep the
+        queue non-empty while it reads the previous step's token.
+
+        Returns an opaque handle for `resolve`.
+        """
         if plan.op == "prefill":
-            return self._prefill(plan)
-        if plan.op == "decode":
-            return self._decode(plan)
-        raise ValueError(f"unknown plan op {plan.op!r}")
+            staged = self._prefill(plan)
+        elif plan.op == "decode":
+            staged = self._decode(plan)
+        else:
+            raise ValueError(f"unknown plan op {plan.op!r}")
+        return staged
+
+    def resolve(self, pending) -> list[StepResult]:
+        """Wait for a step's token read and build its results."""
+        return self._unstake(pending)
 
     def shutdown(self) -> None:
         self._reset()
@@ -103,7 +151,13 @@ class ReferenceBackend:
             plen - min_len + (r.max_new_tokens or 1)
             for r, plen in zip(rows, prompt_lens)
         )
-        total = min_len + window
+        # One position of slack. The serial engine runs exactly `window` decode steps
+        # for a cohort; the pipelined loop builds step i's plan before step i-1's
+        # tokens are read, so the rows that finish last are not yet known to be
+        # finished and the cohort takes one more step. That step's own tokens are
+        # discarded, but `_decode` refuses to run past the buffer, so the buffer has
+        # to allow it.
+        total = min_len + window + 1
         self._tokens = _new_tokens_buffer(len(rows), total, rows, prompt_lens)
         self._prompt_lens = prompt_lens
         self._req_ids = [r.req_id for r in rows]
@@ -162,12 +216,21 @@ class ReferenceBackend:
 
     # -- shared --------------------------------------------------------------
 
-    def _collect(self, out_ids, logits, position: int) -> list[StepResult]:
-        """Apply prompt override, sample per row, decide emission and finishes.
+    def _collect(self, out_ids, logits, position: int) -> "_Staged":
+        """Apply prompt override, sample per row, and start reading the result.
 
         Sampling is batched over the emitting rows: one device-side gather, one
         top-p pass, one sampling draw and a single host transfer, instead of a
-        per-row `.item()`/softmax pair and a per-row Python->CUDA token write."""
+        per-row `.item()`/softmax pair and a per-row Python->CUDA token write.
+
+        The emit set is a function of `position` against each row's prompt length
+        and nothing else. It is deliberately *not* a function of finish state: a
+        finished row stays in the fixed cohort and keeps drawing until the cohort
+        drains, so the number of draws per step -- and therefore the global
+        generator's stream -- is the same whether a row has finished or not. That
+        property is what makes a pipelined delivery safe, because a pipelined step
+        reads the previous step's tokens after the next step has been enqueued.
+        """
         total = self._tokens.shape[1]
         emit = [i for i, plen in enumerate(self._prompt_lens) if position >= plen]
         sampled = self._sample_batch(emit, out_ids, logits) if emit else None
@@ -179,17 +242,55 @@ class ReferenceBackend:
             self._tokens[idx, position] = sampled.to(
                 device=self._tokens.device, dtype=self._tokens.dtype
             )
-        tokens = sampled.tolist() if sampled is not None else []
-        by_i = dict(zip(emit, tokens))
+        return self._stake(emit, sampled)
+
+    def _stake(self, emit, sampled) -> "_Staged":
+        """Start the host read of this step's sampled ids.
+
+        The skeleton is everything about the step that does not depend on the token
+        values: which rows emitted and in what order. Finish detection stays in
+        `_unstake`, because it compares each token against the EOS id.
+        """
+        emit_at = {row: k for k, row in enumerate(emit)}
+        skeleton = [(req_id, emit_at.get(i)) for i, req_id in enumerate(self._req_ids)]
+        if sampled is None:
+            return _Staged(skeleton, None, None, 0)
+        import torch
+
+        count = int(sampled.numel())
+        if sampled.is_cuda:
+            # Non-blocking into pinned memory. Issued here, at the end of this
+            # step's work and before the next step is enqueued, so waiting on the
+            # event later does not wait for the next step. Double-buffered: the
+            # engine holds one step's read in flight while it issues the next.
+            pin = self._pin[self._pin_slot]
+            if pin is None or pin.numel() < count:
+                pin = torch.empty(count, dtype=torch.long, pin_memory=True)
+                self._pin[self._pin_slot] = pin
+            self._pin_slot ^= 1
+            pin[:count].copy_(sampled.reshape(-1), non_blocking=True)
+            event = torch.cuda.Event()
+            event.record()
+            return _Staged(skeleton, pin, event, count)
+        # not a CUDA tensor (stub models, CPU tests): read it where it is
+        return _Staged(skeleton, sampled.reshape(-1), None, count)
+
+    def _unstake(self, staged) -> list[StepResult]:
+        """Wait for a step's token read and build its results."""
+        if not isinstance(staged, _Staged):
+            return staged  # a literal result list (prefix-hit single-token suffix)
+        if staged.event is not None:
+            staged.event.synchronize()
+        tokens = staged.pinned[: staged.count].tolist() if staged.pinned is not None else []
         results = []
-        for i, req_id in enumerate(self._req_ids):
-            if i not in by_i:
+        for req_id, at in staged.skeleton:
+            if at is None:
                 # this row's prediction slot is still inside its prompt:
                 # teacher-forced, nothing emitted. The ground-truth token already
                 # sits in the buffer for the next step to consume.
                 results.append(StepResult(req_id, (), None))
                 continue
-            token = by_i[i]
+            token = tokens[at]
             finish = "stop" if token == self.eos_token_id else None
             results.append(StepResult(req_id, (token,), finish))
         return results

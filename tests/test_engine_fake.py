@@ -107,17 +107,15 @@ def test_sole_driver_single_backend_thread():
         hs = [eng.submit([1] * (i + 1), SamplingParams(max_new_tokens=3)) for i in range(6)]
         for h in hs:
             h.result(timeout=30)
-        # every execute() call happened on the engine thread
-        thread_names = set()
-        # (FakeBackend doesn't record threads; instrument here)
+        # every step happened on the engine thread
         recorded = []
-        orig = fake.execute
+        orig = fake.enqueue
 
         def recording(plan, state):
             recorded.append(threading.current_thread().name)
             return orig(plan, state)
 
-        fake.execute = recording
+        fake.enqueue = recording
         h = eng.submit([1], SamplingParams(max_new_tokens=2))
         h.result(timeout=10)
         assert recorded and all(n == "ds41f-engine" for n in recorded)
@@ -134,10 +132,10 @@ class _RecordingBackend(FakeBackend):
         super().__init__(**kwargs)
         self.prefill_cohort_sizes = []
 
-    def execute(self, plan, state):
+    def enqueue(self, plan, state):
         if plan.op == "prefill":
             self.prefill_cohort_sizes.append(len(plan.rows))
-        return super().execute(plan, state)
+        return super().enqueue(plan, state)
 
 
 def test_admission_window_off_admits_a_single_arrival():
@@ -197,3 +195,80 @@ def test_admission_window_delays_a_lone_arrival_by_at_most_the_window(monkeypatc
     assert elapsed >= 0.04, elapsed
     # ... and the wait is bounded, not open-ended
     assert elapsed < 2.0, elapsed
+
+
+# ------------------------------------------------- pipelined delivery (section 3)
+
+def _run_three(monkeypatch, pipeline: bool):
+    """Two requests, one of which stops early, one of which runs to the cap.
+
+    Returns the two completions and the plan schedule. The early stop is the
+    interesting case: the finished row has to keep its place in the cohort and keep
+    drawing for as long as the serial path drew for it, or the stream the other row
+    sees shifts.
+    """
+    monkeypatch.setenv("DS41F_PIPELINE", "1" if pipeline else "0")
+    fake = FakeBackend(vocab=1000, stop_token_ids=frozenset({1005}))
+    with run_engine(backend=fake) as eng:
+        a = eng.submit([1, 2, 3], SamplingParams(max_new_tokens=6))
+        b = eng.submit([4, 5, 6, 7], SamplingParams(max_new_tokens=6))
+        ha = a.result(timeout=10)
+        hb = b.result(timeout=10)
+    schedule = [(p.op, len(p.rows)) for p in fake.executed]
+    return (ha.token_ids, ha.finish_reason), (hb.token_ids, hb.finish_reason), schedule
+
+
+def test_the_pipeline_flag_actually_selects_the_pipelined_loop(monkeypatch):
+    """Guards the two tests below: if the flag stopped selecting the loop they would
+    compare the serial path against itself and pass."""
+    from ds41f.backend import FakeBackend as FB
+    from ds41f.engine import EngineConfig as EC
+    from ds41f.engine import LLMEngine as LE
+
+    for value, expected in (("0", False), ("1", True)):
+        monkeypatch.setenv("DS41F_PIPELINE", value)
+        assert LE(FB(), EC())._pipeline is expected
+    # a backend that has no split contract cannot be pipelined
+    class OnlyExecute:
+        def execute(self, plan, state):
+            return []
+
+    monkeypatch.setenv("DS41F_PIPELINE", "1")
+    assert LE(OnlyExecute(), EC())._pipeline is False
+
+
+def test_pipelined_delivery_is_token_identical_to_serial(monkeypatch):
+    serial = _run_three(monkeypatch, pipeline=False)
+    pipelined = _run_three(monkeypatch, pipeline=True)
+    assert pipelined[0] == serial[0], (serial[0], pipelined[0])
+    assert pipelined[1] == serial[1], (serial[1], pipelined[1])
+
+
+def test_pipelined_delivery_keeps_the_batch_composition(monkeypatch):
+    """Pipelining must not change which rows run together, and must cost at most one
+    extra trailing decode step.
+
+    The extra step is the price of building step i's plan before step i-1's tokens
+    are read: the last rows to finish are not known to be finished yet, so the cohort
+    gets one more step. Its own tokens are discarded (the rows are already terminal
+    by the time it is delivered). On the real backend that step needs one position of
+    slack in the cohort's token buffer.
+    """
+    serial = _run_three(monkeypatch, pipeline=False)[2]
+    pipelined = _run_three(monkeypatch, pipeline=True)[2]
+    assert len(pipelined) - len(serial) in (0, 1), (serial, pipelined)
+    # same op sequence and same batch composition, up to that one trailing step
+    assert pipelined[: len(serial)] == serial, (serial, pipelined)
+    if len(pipelined) > len(serial):
+        assert pipelined[-1][0] == "decode"
+
+
+def test_pipelined_delivery_runs_a_batched_cohort(monkeypatch):
+    """The one extra step a pipelined cohort can take must be legal and harmless."""
+    monkeypatch.setenv("DS41F_PIPELINE", "1")
+    fake = FakeBackend(vocab=1000)
+    with run_engine(backend=fake) as eng:
+        handles = [eng.submit([1, 2, 3], SamplingParams(max_new_tokens=4)) for _ in range(3)]
+        for h in handles:
+            assert h.result(timeout=10).completion_tokens == 4
+    assert any(len(p.rows) == 3 for p in fake.executed), [len(p.rows) for p in fake.executed]

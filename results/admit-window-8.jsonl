@@ -1061,3 +1061,5 @@
 {"t": 1789330057.952071, "op": "decode", "batch": 2, "rows": [23, 24], "step_s": 0.05512, "graphed": 1, "eager": 0}
 {"t": 1789330058.007368, "op": "decode", "batch": 2, "rows": [23, 24], "step_s": 0.05519, "graphed": 1, "eager": 0}
 {"t": 1789330058.062603, "op": "decode", "batch": 2, "rows": [23, 24], "step_s": 0.055138, "graphed": 1, "eager": 0}
+{"t": 1789330112.609679, "op": "prefill", "batch": 1, "rows": [25], "step_s": 0.244371, "graphed": 0, "eager": 1}
+{"t": 1789330112.638499, "op": "decode", "batch": 1, "rows": [25], "step_s": 0.028677, "graphed": 1, "eager": 0}
