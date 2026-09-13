@@ -131,18 +131,19 @@ reference on the 8192 x 20480 x 24 shape:
 
 | Dot | Max abs error on mixes | Per 8K call |
 | --- | --- | --- |
-| bf16, weight split into hi + lo | 6.9e-3 | 0.25 ms |
+| bf16, weight split into hi + lo | 5.3e-3 | 0.25 ms |
 | tf32, weight split into hi + lo | 3.0e-3 | 0.94 ms |
-| tf32x3, fp32 weight | 2.9e-5 | 0.96 ms |
+| tf32x3, fp32 weight | 4.4e-5 | 0.96 ms |
 | reference: upcast, `pow`, `mean`, fp32 GEMM | — | 1.89 ms |
 
 `input_precision="tf32x3"` splits both operands into a high and a low tf32 half
 and keeps the three cross products, so the mantissa is effectively 21 bits. Its
-2.9e-5 error is 2-3x the reference's own fp32 accumulation-order noise (~1e-5),
-against 6.9e-3 for the bf16 split. It is the default mode.
+error is a few 1e-5 across lengths, against 5.3e-3 for the bf16 split, and it is
+close to the reference's own fp32 accumulation-order noise. It is the default
+mode.
 
-Splitting the weight into bf16 halves and using bf16 tensor cores is 3.8x faster
-again but its 6.9e-3 error is in the same decade as the bf16 rounding of the
+Splitting the weight into bf16 halves and using bf16 tensor cores is 3.9x faster
+again but its 5.3e-3 error is in the same decade as the bf16 rounding of the
 coefficients it produces. `DSV41F_HC_MIXES_MODE=split` selects it. Splitting into
 *tf32* halves is not a middle ground: Triton lowers `input_precision="tf32"` such
 that the residual is only partly recovered, giving 3.0e-3.
@@ -193,6 +194,9 @@ same run with `hc_mixes` fused:
 | 2048 | split | max 0.83, mean 0.134 | max 1.17, mean 0.234 |
 | 8192 | tf32x3 | max 2.83, mean 0.317 | max 1.45, mean 0.218 |
 | 8192 | split | max 2.06, mean 0.293 | max 3.14, mean 0.299 |
+
+Both fused modes are compared at 8192 in `results/trusted-hcmixes.json` (split)
+and `results/trusted-final.json` (tf32x3).
 
 At 8192 the same-configuration spread already exceeds the harness's 1.25 gate, so
 `prefill_max_logit_diff` is not a usable signal at that length. The fused tf32x3
