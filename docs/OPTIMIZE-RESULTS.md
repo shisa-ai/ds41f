@@ -34,12 +34,14 @@ Remaining work and follow-up status:
 | Custom / symmetric-memory collectives | The original pass measured NCCL only. Follow-up experiments are in progress; an end-to-end gain is not established. See [Collectives](#collectives). |
 | Deterministic prefill | Not attempted. See [Noise floor](#noise-floor). |
 
-## Latest saved model measurements
+## Full-prompt diagnostic run
 
-The newer `results/fulllogits-hcmixes-off.json` contains the following averages
-of two optimized runs. It is marked **failed** on correctness checks; these
-numbers describe execution time, not a validated release. The full-prompt score
-comparison runs separately from the timed prompt-processing pass.
+`results/fulllogits-hcmixes-off.json` is newer than the trusted run, but it is
+marked **failed** on correctness checks. It contains the following averages of
+two optimized runs; these numbers describe execution time, not a validated
+release. The full-prompt score comparison runs separately from the timed
+prompt-processing pass. The README reports the passing `trusted-shipped.json`
+run instead.
 
 | Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
 | --- | ---: | ---: | ---: | ---: |
@@ -48,8 +50,7 @@ comparison runs separately from the timed prompt-processing pass.
 
 These are model-only measurements on random-token prompts with predetermined
 continuation tokens. Fresh end-to-end serving throughput and peak memory are not
-recorded. The historical tuning comparison below uses an earlier run and must
-not be described as the latest measurement.
+recorded. The tuning-pass comparison below is a separate, earlier run.
 
 ## Tuning-pass comparison (earlier measurements)
 
