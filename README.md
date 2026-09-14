@@ -119,6 +119,31 @@ not confirm a headline figure because the machine was noisier than it was for th
 run above, and the measurement and that limitation are both recorded in
 [Fused rotary embedding](docs/OPTIMIZE-RESULTS.md#fused-rotary-embedding).
 
+**Where the campaign stands (2026-09-14).** The table above has not been re-run
+since the changes listed below, so it understates the current engine. The
+controlled series the campaign is tracked on -- `bench_ab.py`, 2K prompt, 30 decode
+steps, 9-15 interleaved repeats per arm, step graph rebuilt per arm, identical
+tokens -- has the decode step at **25.97 ms/step against a 28.04 ms/step baseline,
+-7.4%**, over ten kept changes. The three most recent:
+
+| Change | ms/step |
+| --- | ---: |
+| Third fusion pass, measured as one change set | +1.345 (+4.90%) |
+| `act_quant` output-buffer cache, now on by default | +0.078 |
+| Gate pre-top-k chain fused into one launch | +0.072 |
+
+Every change is behind a default-on flag with a bit-exactness gate of its own. The
+flags, their checks and their raw A/B samples are in [docs/OPTIMIZE.md](docs/OPTIMIZE.md)
+and [results/](results/).
+
+Two caveats on that number. The metric series is **drift-anchored, not raw**: the
+machine was shared with another 131 GB job through the last iterations, so each
+iteration's metric is its on-arm median corrected by that same run's off-arm offset,
+which is the only comparison the contention does not contaminate. The raw samples
+for every run are in `results/`. And the headline table above is a *different*
+harness (`benchmark_ds41f.py`, 512/2K/8K with 32 decode steps), so it should be
+re-run before quoting rather than scaled from the A/B series.
+
 - Runs follow kernel compilation and warmup, use random-token prompts with predetermined continuation tokens, and measure 32 decode steps. Throughput is the slowest GPU worker.
 - The run compares only the last prompt position; see [Limits](#limits).
 - HTTP queueing, backend sampling and token delivery are excluded, so these are model-loop numbers. Served latency is measured in [Served latency](#served-latency).

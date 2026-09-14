@@ -817,6 +817,46 @@ end-to-end A/B (11.9% lower latency, three repeats, interleaved) is the
 trustworthy number here; the per-group split is one trace each and should be read
 as indicative.
 
+### `hc_split_sinkhorn`: the kernel is the cost, not the launch
+
+The remaining-items table prices its 80 launches/step (2 per layer, 40 layers) at
+0.16 ms/step, which contradicts the attribution table's own 0.33 for the same
+kernel. The 0.16 is the error. `probe_hc_sinkhorn_cost.py` measures the marginal
+graphed cost of one launch -- capture a graph of K launches and of 2K, take
+`(2K - K)/K` -- so the eager Python-side launch cost is deliberately excluded,
+since a replayed step graph does not pay it:
+
+| | us per launch | 80/step |
+| --- | ---: | ---: |
+| `sinkhorn_iters=1` | 1.413 | 0.113 ms |
+| `sinkhorn_iters=5` | 1.909 | 0.153 ms |
+| `sinkhorn_iters=20` (shipped) | 3.825 | **0.306 ms** |
+
+Two things follow, and both overturn the table's stated reason for leaving it:
+
+- **It is not launch overhead.** The cost tracks `sinkhorn_iters` -- 1.41 us at 1
+  against 3.83 at 20, i.e. ~127 ns per iteration for two 4-element reductions --
+  and it is flat in the number of rows: n=1, 8 and 64 all measure ~4 us, because
+  the kernel is one block per row and the blocks run in parallel. 127 ns per
+  iteration for 16 useful elements is barrier latency, not arithmetic: the kernel
+  spreads a 4x4 matrix over 64 threads and then does 40 block-wide reductions.
+- **The two calls per layer cannot be merged**, which is what the table proposed.
+  They are *dependent*: `Block.forward` runs `hc_mixes` on the block input for the
+  attention sublayer, then attention, then `hc_mixes` again on the x that attention
+  produced, for the FFN sublayer. Different scale/base tensors are the smaller
+  problem; the second call's input does not exist until the first call's consumer
+  has run.
+
+So the sinkhorn is not a launch problem to be removed but a 4x4 problem being
+solved with 64 threads. The full `hc_mixes` + sinkhorn chain measures 14.25 us per
+call, i.e. 1.14 ms/step over 80 calls. A smaller block is the obvious candidate --
+and it would have to be shown bit-identical, since the reduction order is what has
+to be preserved -- for which `probe_hc_sinkhorn_threads.py` is the harness. That
+sweep is **not resolved**: it had not finished when the campaign stopped for GPU
+access, and the only thing it had established is that the candidate kernels build.
+Treat the sinkhorn as 0.31 ms/step of measured, still-open headroom rather than as
+a 0.16 ms/step item with a known fix.
+
 ### Attributing launches to the function that issued them
 
 The launch-count table above groups kernels by name, which says *what* ran but not

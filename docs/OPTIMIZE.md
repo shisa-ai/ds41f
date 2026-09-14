@@ -16,6 +16,27 @@ dedicated [vLLM implementation](https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4.
 as the production comparison. Section 5 now includes our source-level DSpark
 feasibility analysis; runtime integration and its performance gate remain open.
 
+Status (September 14, 2026) -- the decode fusion campaign. Section 3's pass took
+the decode step from **28.04 to 25.97 ms/step, -7.4%**, over ten kept changes,
+every one behind a default-on flag with a bit-exactness gate of its own. It was
+tracked on `bench_ab.py` (2K prompt, 30 decode steps, 9-15 interleaved repeats per
+arm, step graph rebuilt per arm, identical tokens), and each change's raw samples
+are in [`results/`](../results/). The last three are the third fusion pass
+(+1.345 ms/step, +4.90%, measured as one change set rather than as the sum of its
+four flags), the `act_quant` output-buffer cache (+0.078) and the gate's pre-top-k
+chain (+0.072).
+
+Two things to carry forward from it. The metric series is **drift-anchored, not
+raw**: the machine was shared with another 131 GB job for the last iterations, so
+each metric is that run's on-arm median corrected by the same run's off-arm offset
+-- the only comparison the contention does not contaminate. And the campaign's
+headline throughput table is a *different* harness, so it needs its own re-run
+rather than being scaled from this series; the README says so where it quotes it.
+What is left in section 3 is now tabulated with its measured size and its specific
+blocker, and the two largest remaining levers are both outside the bit-exactness
+discipline this campaign used -- Marlin (section 1) and the torch reduction-order
+wall behind the two `aten::mean` sites.
+
 The [README](../README.md#performance) reports the trusted, passing run
 (`trusted-shipped.json`). The newer full-prompt diagnostic run in
 [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#full-prompt-diagnostic-run) is marked
@@ -380,7 +401,7 @@ awkward:
 | --- | ---: | --- |
 | `Gate.forward` elementwise tail and top-k | ~0.9, of which **the pre-top-k half is taken** | the pre-top-k chain is now fused (+0.072 ms/step, `_GATE_PREP_FUSED`). What remains is the post-top-k half -- `gather`, `sum`, `+1e-20`, `div`, `*route_scale` -- and it needs the 6-element sum order and the top-k tie-breaking bit-for-bit. The **sum order was probed and does not reproduce**: six candidate orders for `[1, 6]` fp32 all mismatch torch on about half of 2,000 draws, which is the same wall the two `mean`s hit |
 | Two `aten::mean` sites (RMSNorm, `hc_mixes`) | 0.63 | torch's reduction order is not reproducible; the one-kernel RMSNorm is 2.97% faster and differs on ~5 bf16 elements per million |
-| `hc_split_sinkhorn`, 2 calls per layer | 0.16 | the kernel is already batched over its leading dim, but the two calls use different scale/base tensors, so merging them changes its signature |
+| `hc_split_sinkhorn`, 2 calls per layer | **0.31**, and the stated reason was wrong | the attribution table already carried it at 0.33, so the 0.16 here was too low. Measured marginal graphed cost is 3.83 us/launch x 80 = **0.306 ms/step**, and it is the kernel's own serial work, not launch overhead: 1.41 us at `sinkhorn_iters=1` against 3.83 at 20, and flat in rows (n=1, 8 and 64 all ~4 us). The reason given here -- "the two calls use different scale/base tensors, so merging them changes its signature" -- is also wrong: the two calls per layer are *dependent*, because the FFN's `hc_mixes` reads the x that the attention sublayer just produced, so they cannot be merged at all. The lever is the kernel itself: 40 block-wide reductions over a 4x4 matrix with 64 threads |
 | The two `torch.cat` in `Attention.forward` | 0.14 | removing them means giving `sparse_attn` two KV sources instead of one |
 | `RowParallelLinear`'s fp32 cast pair | 0.14 | the fp32 all-reduce is deliberate; the cast into it could only go if the GEMV stored the bf16 rounding in fp32 |
 | The Indexer's `torch.sort` of 512 indices | 0.21 | 22.8 µs for 512 int32, a fixed-cost radix kernel; a Triton bitonic sort measures 15.1 µs, so the prize is 0.06 ms/step |
