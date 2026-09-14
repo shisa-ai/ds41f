@@ -1,0 +1,30 @@
+{
+  "change": "quantize the MoE's decode input row once for _w13 and the shared expert's w1/w3",
+  "flag": "_MOE_SHARED_QUANT",
+  "harness": "bench_ab.py --flag _MOE_SHARED_QUANT --repeats 4",
+  "env": "DSV41F_ENGRAM_OFFLOAD=1, TP4, B=1, 2048 context, worst rank",
+  "on_ms_per_step": [26.354, 26.284, 26.337, 26.295],
+  "off_ms_per_step": [26.614, 26.538, 26.581, 26.493],
+  "on_median": 26.316,
+  "off_median": 26.560,
+  "delta_ms_per_step": 0.244,
+  "delta_percent_latency": 0.92,
+  "act_quant_calls_per_step": {"on": 330, "off": 410},
+  "act_quant_redundant_calls_per_step": {"on": 48, "off": 128},
+  "identical_tokens": true,
+  "exactness": {
+    "probe_quant_dupes.py": "410 -> 330 calls and 128 -> 48 redundant over 282 distinct input tensors; the probe holds a reference to every input so id() is exact",
+    "check_decode_parity.py": "prefill logits bit-equal 66191360/66191360, decode logits bit-equal at every step, first differing token step = None (64 steps)"
+  },
+  "related_measurement": {
+    "flag": "kernel._ACT_QUANT_CACHE_ENABLED",
+    "note": "the pre-existing buffer/kernel cache, still opt-in",
+    "on_ms_per_step": [26.506, 26.497, 26.355, 26.318],
+    "off_ms_per_step": [26.926, 26.561, 26.789, 26.605],
+    "on_median": 26.426,
+    "off_median": 26.697,
+    "delta_ms_per_step": 0.271,
+    "delta_percent_latency": 1.01,
+    "identical_tokens": true
+  }
+}
