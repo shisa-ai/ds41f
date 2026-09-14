@@ -45,6 +45,7 @@ Remaining work and follow-up status:
 | Cached fp32 gate weight | **Cached, 1.65% lower decode latency at identical tokens.** The gate GEMV runs in fp32, so `Gate.forward` upcast the bf16 routing weight on every one of 40 layers of every step: exact, but 8.5 µs of GPU time per layer for a constant. 27.540 -> 27.085 ms/step. The attribution that found it needed the MoE's own decode graph bypassed, which is why the kernel-name view had the routing at 0.67 ms/step rather than 1.46. See [Caching the routing weight cast](#caching-the-routing-weight-cast). |
 | Shared-expert SwiGLU tail | **Fused, 1.67% lower decode latency at identical tokens.** Seven launches per layer for a `[1, 2304]` tensor (two casts, two clamps, silu, multiply, cast back), 0.397 ms/step. The routed experts already compute the same expression in one launch, so that kernel is reused, with `weights=None` to skip the multiply. 27.053 -> 26.602 ms/step, 240 launches/step fewer. See [Fusing the shared expert's SwiGLU tail](#fusing-the-shared-experts-swiglu-tail). |
 | Shared MoE input quantization | **Shared, 0.92% lower decode latency at identical tokens.** The MoE's input row is read by three quantized weights (`_w13` and the shared expert's `w1`/`w3`) and each quantized it for itself. A probe counted 410 `act_quant` calls in a decode step over 282 distinct inputs, so 128 redundant, 80 of them this row. 26.560 -> 26.316 ms/step, and the probe confirms the mechanism: 410 -> 330 calls, 128 -> 48 redundant. See [Quantizing the MoE's input row once](#quantizing-the-moes-input-row-once). |
+| Shared attention input quantization | **Shared, 0.52% lower decode latency at identical tokens, at the edge of what the harness resolves.** The attention block's input is read by two quantized weights (`wq_a`, `wkv`) and each quantized it for itself: 40 more of the redundant calls, on all 40 layers. One argument on `_window_kv`. 26.263 -> 26.128 ms/step at 7 repeats, and the probe confirms the mechanism: 330 -> 290 calls, 48 -> 8 redundant. Both A/B runs are recorded, including the one where the arms overlap. See [Quantizing the MoE's input row once](#quantizing-the-moes-input-row-once). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
@@ -645,6 +646,7 @@ The checks are listed in [Verification](#verification).
 | Cached fp32 gate weight | 1 cast/layer | 0/layer | 40 | +0.456 | +1.65% | identical |
 | Fused shared-expert SwiGLU tail | 7/layer | 1/layer | 240 | +0.450 | +1.67% | identical |
 | Shared MoE input quantization | 3/layer | 1/layer | 80 | +0.244 | +0.92% | identical |
+| Shared attention input quantization | 2/layer | 1/layer | 40 | +0.136 | +0.52% | identical |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
@@ -973,7 +975,6 @@ last-position parity gate is sensitive to prefill changes.
 The three weights that read the MoE's input row at decode -- the routed `_w13` and the
 shared expert's `w1` and `w3` -- each quantize their own input, so the row was
 quantized three times per layer.
-
 That count is from `probe_quant_dupes.py`, which wraps `act_quant` for one eager
 decode step and reports how many calls re-quantize an input another call in the same
 step already quantized. **410 calls over 282 distinct input tensors, so 128
@@ -1001,6 +1002,23 @@ prefill logits bit-equal over 66,191,360 values with no differing token in 64 st
 The remaining 48 redundant calls are in the attention path, where the four consumers
 of the block's input are separate methods (`_window_kv`, `_compress_kv`, the indexer)
 and the pair would have to be threaded through three signatures. Measured, not taken.
+
+**Taken, in a later pass.** The probe, reporting the caller of `linear` rather than
+`linear` itself (one line for every call site, so it could not tell two apart), put
+40 of those 48 on `wq_a` and `wkv` -- both read the attention block's input, and both
+are quantized, while the compressor's projections are fp32 or bf16 and do not quantize
+at all, which is why the count is exactly two per layer and not four. Sharing it is
+one argument on `_window_kv`: **410 -> 290 calls and 128 -> 8 redundant** over the two
+changes, with the distinct-input count unchanged at 282, so nothing new is quantized.
+The 8 that remain are a `ColumnParallelLinear` pair on the 8 index-source layers.
+
+This one is at the edge of what the harness resolves, and the two runs are recorded
+rather than the better one: 4 repeats gave **+0.097 ms/step (+0.37%)** with the arms
+overlapping by one sample, 7 repeats gave **26.128 against 26.263, +0.136 ms/step
+(+0.52%)**, with one crossing. It is kept because 0.10-0.14 ms over 40 calls is
+2.4-3.4 µs each -- the `act_quant` GPU figure plus host cost -- so the size is what the
+mechanism predicts, and because the mechanism is confirmed independently of the timing.
+`DSV41F_ATTN_SHARED_QUANT=0` restores the per-weight quantization.
 
 There is a cheaper way to remove all 128 that was also measured and **not** taken:
 the pre-existing `DSV41F_ACT_QUANT_CACHE=1`, which reuses the compiled kernel and the
