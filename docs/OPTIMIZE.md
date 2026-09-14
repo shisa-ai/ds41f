@@ -37,6 +37,48 @@ blocker, and the two largest remaining levers are both outside the bit-exactness
 discipline this campaign used -- Marlin (section 1) and the torch reduction-order
 wall behind the two `aten::mean` sites.
 
+**Decode, change by change.** Every row is that change's own interleaved A/B
+(`bench_ab.py`, 2K prompt, 30 decode steps, B=1, TP4, worst rank), named by its
+artifact in [`results/`](../results/), so each row's `off` arm is the configuration
+as it stood when that change was measured. Two rows are change *sets* measured with
+all their flags toggled together, which is why the four flags inside each do not
+appear separately: adding a set's members up would double-count them.
+
+| Change | ms/step | latency | artifact |
+| --- | ---: | ---: | --- |
+| First decode fusion pass (4 changes, one set) | +3.883 | +11.91% | `ab-combined-decode-fusion` |
+| RoPE fused | +0.651 | +2.30% | `ab-rope-fused-b` |
+| Engram gather LUT | +0.097 | +0.35% | `ab-engram-lut-b` |
+| Gate weight cache | +0.455 | +1.65% | `ab-gate-weight-cache` |
+| Shared-expert SwiGLU fused | +0.451 | +1.67% | `ab-expert-swiglu-fused` |
+| MoE input row quantized once | +0.244 | +0.92% | `ab-moe-shared-quant` |
+| Attention input quantized once | +0.115 | +0.44% | `ab-attn-shared-quant` |
+| Third fusion pass (4 flags, one set) | +1.345 | +4.90% | `ab-third-fusion-pass-combined` |
+| `act_quant` output-buffer cache | +0.078 | +0.30% | `ab-act-quant-cache-on-by-default` |
+| Gate pre-top-k fused | +0.072 | +0.28% | `ab-gate-prep-fused` |
+
+The cumulative figure is **not the sum of that column** (7.392 ms/step). Each row's
+`off` arm was measured on a different day, and the machine drifts, so the arms do
+not chain exactly -- the third pass's `off` arm measures 27.452 where the chain
+around it says 26.2. The defensible cumulative is the chain of the arms themselves:
+**32.599 to 26.134 ms/step, -6.465 ms or -19.8%**, against the pre-fusion baseline.
+Two independent methods corroborate it: the full harness with each run's own
+reference arm as a drift control gives **-17.7% to -21.1%** (see the README's
+[Performance](../README.md#performance) section), and the campaign's drift-anchored
+metric series covers only its own later part (28.04 to 25.97, -7.4%) because it
+started after the first pass, RoPE and Engram were already in.
+
+Against the **reference path** rather than the pre-fusion optimized one, the same
+step is **217.0 to 26.1 ms/token, -88%, 8.3x**.
+
+Three changes were measured and deliberately **not** kept, and they are not in the
+table: the one-launch RMSNorm (+2.97%, `ab-rmsnorm-onepass`, differs on ~5 bf16
+elements per million and so fails the bit-exactness gate), the custom-allreduce path
+(+0.01% routed through the engine, `ab-custom-ar`, opt-in because it moves generated
+tokens), and the first `act_quant` cache measurement (+0.71%,
+`ab-act-quant-cache`), superseded by the re-measurement above once the shared-quant
+changes had removed a third of the calls whose scratch it saves.
+
 The [README](../README.md#performance) reports the trusted, passing run
 (`trusted-shipped.json`). The newer full-prompt diagnostic run in
 [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#full-prompt-diagnostic-run) is marked
