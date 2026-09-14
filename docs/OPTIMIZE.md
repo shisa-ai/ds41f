@@ -9,6 +9,45 @@ FP4/MXFP4/NVFP4 tensor cores**. FP4 weights need a supported conversion/compute
 path. Dense FP8 GEMV does not establish the best path for FP4 experts. Ampere and
 Blackwell results do not transfer directly.
 
+## Current checklist — September 14, 2026
+
+The campaign is **paused at iteration 17, with ten accepted changes**. GPU work
+is paused for other workloads. Both repositories were pushed after the stopping-point
+review. The engine suite passed 87 tests with one skipped using a CPU override;
+that check did not revalidate GPU execution.
+
+| Area | Where we are | Remaining work |
+| --- | --- | --- |
+| Decode fusion | Accepted changes are enabled by default; the adjusted campaign estimate is 28.04 → 25.97 ms/step. | Rerun the headline and served benchmarks when GPUs are available; do not turn the adjusted estimate into a throughput claim. |
+| Headline measurements | README uses the passing `trusted-rope-fused-4rep.json`: 35.2–36.4 tok/s across its context lengths. It predates later changes. | Measure current defaults under consistent conditions, with a new run manifest. |
+| Batched decode | Graphs cover batches through 8; small batches use the decode expert kernels. Saved batch-2/4/8 rates are 39.7/65.2/97.2 aggregate tok/s. | Refresh these measurements after the latest fusions; qualify representative mixed workloads. |
+| Serving and admission | Packed tensor broadcasts and header cleanup landed. An optional 8 ms admission window measured 40.80 → 52.42 aggregate tok/s at concurrency 4. | Continuous admission and per-row positions remain open; the admission window only helps form a new cohort. |
+| Overlapped token delivery | Implemented, tested and removed: no served gain, with an extra-step RNG hazard. The enqueue/resolve interface remains. | Revisit only with evidence that a revised rank-coordination protocol removes the blocking dependency. |
+| Custom allreduce | Integration works and remains opt-in; served latency measured about 29.0 → 27.6 ms. | Qualify model-level numerical/quality effects before making it the default; generated tokens differ. |
+| Marlin | Isolated expert benchmark measured 2.8× faster execution; no model integration. | Match activation precision in an independent reference, test real layer inputs/routing, integrate optionally, then measure end to end. |
+| Attention output projection | Tested FP8 implementation was slower than BF16. | No further work on that candidate unless new evidence changes the comparison. |
+| Placement and provenance | Loader application, per-rank mapping audit, artifact hashing and manifests landed. | Held-out real-traffic calibration and qualification remain open. |
+| Prefill correctness | Last-position checks pass in the headline artifact; whole-prompt equivalence is unresolved. | Independent state/routing comparisons and held-out quality evaluation. Keep timing separate from full-logit checks. |
+| Small remaining operations | Sinkhorn costs about 0.31 ms/step; two mean reductions total about 0.63 ms in the recorded attribution. | Smaller-block Sinkhorn sweep is unfinished. Reduction-order compatibility remains unresolved. These costs are not promised savings. |
+| DSpark | Source feasibility analysis complete; no custom-engine runtime benchmark. | Build the greedy single-request draft/verify/commit prototype in section 5. |
+| Topology and broader scheduling | No completed EP/pipeline topology or continuous-admission implementation. | Defer topology changes until current profiles justify them. |
+
+Next work order, when GPU access resumes:
+
+1. Record a fresh baseline for current defaults, including served and batched
+   execution, and preserve the configuration, placement hash and actual token counts.
+2. Run a bounded Marlin qualification and integration experiment. The historical
+   2.6 ms saving is an extrapolation, not a measured current-model gain.
+3. Start the DSpark correctness prototype early; measure the six-position verifier
+   and draft/commit cost before expanding its serving interface.
+4. Continue independent prefill-state and quality qualification, including the
+   optional custom-allreduce backend's numerical effects.
+5. Revisit the small reduction kernels only as bounded experiments. Preserve the
+   existing working implementations until correctness and an end-to-end gain pass.
+
+The dated review below is retained as history. Its defect list describes the
+original pass; this checklist is the current work order.
+
 Status (September 13, 2026): the first custom-engine tuning pass is complete,
 but this punchlist is **not fully implemented or qualified**. The review below
 records implementation defects, evidence limits and the next work order. Keep the
@@ -33,9 +72,8 @@ each metric is that run's on-arm median corrected by the same run's off-arm offs
 And the campaign's headline throughput table is a *different* harness, so it needs its own re-run
 rather than being scaled from this series; the README says so where it quotes it.
 What is left in section 3 is now tabulated with its measured size and its specific
-blocker, and the two largest remaining levers are both outside the bit-exactness
-discipline this campaign used -- Marlin (section 1) and the torch reduction-order
-wall behind the two `aten::mean` sites.
+blocker. Marlin and DSpark are broader remaining opportunities; the two
+`aten::mean` sites are a smaller numerical-compatibility experiment.
 
 **Decode, change by change.** Every row is that change's own interleaved A/B
 (`bench_ab.py`, 2K prompt, 30 decode steps, B=1, TP4, worst rank), named by its
@@ -44,7 +82,7 @@ as it stood when that change was measured. Two rows are change *sets* measured w
 all their flags toggled together, which is why the four flags inside each do not
 appear separately: adding a set's members up would double-count them.
 
-| Change | ms/step | latency | artifact |
+| Change | Saved ms/step | Latency reduction | Artifact |
 | --- | ---: | ---: | --- |
 | First decode fusion pass (4 changes, one set) | +3.883 | +11.91% | `ab-combined-decode-fusion` |
 | RoPE fused | +0.651 | +2.30% | `ab-rope-fused-b` |
@@ -57,30 +95,20 @@ appear separately: adding a set's members up would double-count them.
 | `act_quant` output-buffer cache | +0.078 | +0.30% | `ab-act-quant-cache-on-by-default` |
 | Gate pre-top-k fused | +0.072 | +0.28% | `ab-gate-prep-fused` |
 
-The cumulative figure is **not the sum of that column** (7.392 ms/step). Each row's
-`off` arm was measured on a different day, and the machine drifts, so the arms do
-not chain exactly -- the third pass's `off` arm measures 27.452 where the chain
-around it says 26.2. The defensible cumulative is the chain of the arms themselves:
-**32.599 to 26.134 ms/step, -6.465 ms or -19.8%**, against the pre-fusion baseline.
-Two independent methods corroborate it: the full harness with each run's own
-reference arm as a drift control gives **-17.7% to -21.1%** (see the README's
-[Performance](../README.md#performance) section), and the campaign's drift-anchored
-metric series covers only its own later part (28.04 to 25.97, -7.4%) because it
-started after the first pass, RoPE and Engram were already in.
+These per-change savings must not be added: baseline configurations, machine
+conditions and overlapping changes differ. The chained estimate previously
+reported as 19.8% and the reference-normalized 17.7–21.1% range depend on
+assumptions about contention. Neither replaces a direct current-versus-baseline
+measurement. The adjusted campaign series covers only its later portion.
 
-Against the **reference path** rather than the pre-fusion optimized one, the same
-step is **217.0 to 26.1 ms/token, -88%, 8.3x**.
-
-Three changes were measured and deliberately **not** kept, and they are not in the
-table: the one-launch RMSNorm (+2.97%, `ab-rmsnorm-onepass`, differs on ~5 bf16
-elements per million and so fails the bit-exactness gate), the custom-allreduce path
-(+0.01% routed through the engine, `ab-custom-ar`, opt-in because it moves generated
-tokens), and the first `act_quant` cache measurement (+0.71%,
-`ab-act-quant-cache`), superseded by the re-measurement above once the shared-quant
-changes had removed a third of the calls whose scratch it saves.
+The one-launch RMSNorm remains disabled because it changes numerical results.
+Custom allreduce remains opt-in: its earlier `ab-custom-ar` null result did not
+exercise the intended backend and is superseded by the served integration results
+in section 2. The first activation-quantization cache experiment is superseded by
+the later measurement and default-on implementation above.
 
 The [README](../README.md#performance) reports the trusted, passing run
-(`trusted-shipped.json`). The newer full-prompt diagnostic run in
+(`trusted-rope-fused-4rep.json`). The separate full-prompt diagnostic run in
 [OPTIMIZE-RESULTS.md](OPTIMIZE-RESULTS.md#full-prompt-diagnostic-run) is marked
 failed on correctness checks.
 The review below retains the earlier tuning-pass numbers to explain its findings.
@@ -130,7 +158,7 @@ copy**. Close each row only with its regression/serving evidence. The original
 `trusted-shipped.json` still measures last-position prefill logits; a new API
 does not retroactively change that artifact.
 
-Next work order (priority within this document, not a promise of gains):
+Original September 13 work order (historical; superseded by the current checklist):
 
 1. **Repair the evidence and serving defects above.** Pin a new source/config/
    placement manifest. Separate correctness runs from timing; full-vocabulary
@@ -175,8 +203,10 @@ Do not relax thresholds to promote a failing optimization.
 
 ## 0. Current profiling and matched vLLM baseline
 
-Use `trusted-shipped.json`'s 32.46 ms/token configuration as the reviewed
-model-only anchor; preserve the older 44.65 ms/token historical result separately.
+Use the README's `trusted-rope-fused-4rep.json` as the latest saved passing
+headline result, and collect a fresh current-default baseline before new tuning.
+`trusted-shipped.json`'s 32.46 ms/token is the historical pre-fusion anchor;
+`baseline-gpu0123.json` averages 44.81 ms/token at 2K.
 Historical 99 ms expert and 138 ms NCCL timings predate major optimizations;
 neither represents time available to save now. NCCL durations include rank
 waiting: expert and collective savings must not be double-counted.
@@ -228,8 +258,10 @@ than designing a weight layout and GEMM from scratch. Matched gains are unmeasur
 kernels, under graph replay, at the real per-rank decode mix (one token, top-6 of
 384 global experts, 96 owned locally), Marlin is **2.80× faster** than the engine's
 grouped GEMV, averaged over 14 cases (2.3× with no active local expert, 3.2× with
-six). The engine's decode MoE is 4.13 ms/step, so the projected saving is about
-2.6 ms/step (8% of decode) if the ratio transfers. Not integrated: the engine
+six). The earlier profile assigned 4.13 ms/step to the two expert projections.
+Applying the ratio suggests about 2.6 ms/step saved, but the benchmark times a
+whole expert block, so even that scope differs. This is a historical projection,
+not a current end-to-end gain. Not integrated: the engine
 quantizes activations to FP8 and Marlin uses bf16, so the paths are not
 numerically interchangeable. The `wo_a` half is measured and rejected — the FP8
 grouped GEMM is 1.4-7× slower than the bf16 `einsum` at every shape, and the bf16
@@ -258,7 +290,9 @@ and the decode backend is now switchable. Custom allreduce is
 CUDA-graph-capturable under vLLM's supported capture procedure and is 1.3-1.6x
 faster than graphed NCCL at decode sizes; routed through the engine behind
 `DSV41F_CUSTOM_AR=1 DSV41F_EXPANDABLE_SEGMENTS=0` it takes the served decode step
-from 29.0 to 27.6 ms (4.8%), with every call site agreeing with NCCL to 1.9e-06.
+from 29.0 to 27.6 ms (4.8%). Captured call sites differ from NCCL by at most
+1.9e-06; eager BF16 call sites differ by up to 0.03125. These local checks do not
+establish full-model equivalence.
 It stays opt-in because it moves generated tokens on a near-tie-sensitive model.
 FlashInfer is 1.2-1.3x faster than eager NCCL at decode sizes, no faster at
 prefill sizes, and was not integrated. Both decline or are unsupported at prefill
