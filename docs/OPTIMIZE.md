@@ -296,6 +296,78 @@ different argmax. The synthetic exactness check could not see it -- at its
   each. A draw count that reports zero is not evidence until it is large enough to
   have found something.
 
+**Third fusion pass (September 14).** Four more changes, and this pass started by
+fixing the thing that was supposed to be finding them. The per-line attribution tool
+(`profile_decode_stacks.py`) printed `?` in its site column for every row and looked
+like it worked: it read `cpu_op.args['source']`, and current kineto leaves that field
+empty. The Python stacks are in the trace as their own `python_function` events with
+nothing linking a `cpu_op` to them, but every kernel carries a `correlation` that both
+`cuda_runtime` and `cuda_driver` record **with a host timestamp** -- the moment the
+launch was issued -- and containment of that timestamp in the frames attributes
+**100%** of kernels, including the Triton and TileLang ones the op-name join cannot
+reach at all. `analyze_decode_stacks.py` is that analysis split out, so a saved trace
+is re-analysed in seconds. The corrected per-function table is in
+[Decode kernel fusion](OPTIMIZE-RESULTS.md#attributing-launches-to-the-function-that-issued-them).
+
+| Change | ms/step | latency | tokens |
+| --- | ---: | ---: | --- |
+| Cache the gate's fp32 routing weight | +0.456 | +1.65% | identical |
+| Fuse the shared expert's SwiGLU tail | +0.450 | +1.67% | identical |
+| Quantize the MoE's input row once | +0.244 | +0.92% | identical |
+| Quantize the attention block's input once | +0.136 | +0.52% | identical |
+
+That is **1.29 ms/step, 4.8% lower decode latency** over the pass at identical
+tokens, and **400 fewer launches per step** on the same analysis basis
+(3,896 → 3,496, `results/decode-stacks-attribution-moe-eager.txt`). That count is a
+different series from the 6,232 → 4,558 above, which came from
+`analyze_decode_trace.py` on graphed traces; do not splice them. Every change is
+behind a default-on flag with a bit-exactness check of its own, listed in
+[Verification](OPTIMIZE-RESULTS.md#verification).
+
+Three findings from this pass, in the same spirit as the two above:
+
+- **A replayed graph has no Python stack, and that hides whole functions.**
+  `MoE.forward` keeps its own per-layer decode graph, so all 1,400 of its launches
+  attributed to `MoE.forward` -- and the kernel-name view put the routing chain at
+  0.67 ms/step when it is **1.46**. Re-profiling with that graph bypassed
+  (`DSV41F_PROFILE_MOE_EAGER=1`, now a harness option) put `Gate.forward` on top and
+  found the weight cast that the first change removes. An attribution that lands
+  everything on one frame is a signal to open the graph, not a result.
+- **An activation read by N quantized weights is quantized N times.** Every
+  `Linear` quantizes its own input, so a row feeding three weights is quantized three
+  times. `probe_quant_dupes.py` counts it exactly -- **410 calls in one eager decode
+  step over 282 distinct inputs, so 128 redundant** -- and two of the four changes
+  above remove 120 of them. It holds a reference to every input, because the caching
+  allocator otherwise hands the same address to different activations and reports
+  duplicates that are not there.
+- **A cache of a derived tensor needs its invalidation checked against how the
+  tensor actually changes.** The gate weight is cast to fp32 per call; caching it is
+  free numerically, but `load_state_dict` bumps the parameter's version counter while
+  expert placement reassigns `.data`, which moves the data pointer and does **not**.
+  A version-keyed cache would have served the pre-placement weight for the life of the
+  process. It also has to be a tuple rather than a bare tensor, since
+  `nn.Module.__setattr__` registers any Tensor it sees as a buffer, which would put a
+  cache in the checkpoint contract and make a strict load fail.
+
+**What this pass leaves, with its measured size.** Non-collective kernel time is
+16.89 ms/step in 3,404 launches, and the removable part of it is now small and
+awkward:
+
+| Item | ms/step | Why it is still there |
+| --- | ---: | --- |
+| `Gate.forward` elementwise tail and top-k | ~0.9 | needs a kernel matching `softplus`, `sqrt`, the 8-element sum order and the top-k tie-breaking bit-for-bit |
+| Two `aten::mean` sites (RMSNorm, `hc_mixes`) | 0.63 | torch's reduction order is not reproducible; the one-kernel RMSNorm is 2.97% faster and differs on ~5 bf16 elements per million |
+| `hc_split_sinkhorn`, 2 calls per layer | 0.16 | the kernel is already batched over its leading dim, but the two calls use different scale/base tensors, so merging them changes its signature |
+| The two `torch.cat` in `Attention.forward` | 0.14 | removing them means giving `sparse_attn` two KV sources instead of one |
+| `RowParallelLinear`'s fp32 cast pair | 0.14 | the fp32 all-reduce is deliberate; the cast into it could only go if the GEMV stored the bf16 rounding in fp32 |
+| The Indexer's `torch.sort` of 512 indices | 0.21 | 22.8 µs for 512 int32, a fixed-cost radix kernel; a Triton bitonic sort measures 15.1 µs, so the prize is 0.06 ms/step |
+| `kernel._ACT_QUANT_CACHE_ENABLED` | 0.27 | measured at +1.01% and left off: it returns *shared* buffers, so it is sound only where every consumer is enqueued immediately after its producer on one stream, and the MoE's graph build captures on a side stream |
+
+The larger remaining lever is not in this table. The Marlin comparison is 2.8x faster
+than the engine's grouped GEMV at the real per-rank mix, which on `_w13` + `_w2`
+(4.44 ms/step) is worth several ms; it is W4A16 against the engine's W4A8, so it needs
+its own correctness gate rather than this pass's bit-exactness one.
+
 ## 4. Remove cohort waste and sampling synchronization
 
 These serving-path issues are absent from the B=1 teacher-forced kernel benchmark.

@@ -1,147 +1,143 @@
 trace: /data/ds41f/decode_trace_stacks_rank0.json
-3896 kernel launches/step, 74.13 ms of kernel time/step
-op name resolved for 54.4% of kernels (12.63 ms/step unresolved)
+3496 kernel launches/step, 233.97 ms of kernel time/step
+op name resolved for 51.5% of kernels (12.38 ms/step unresolved)
 source line resolved for 100.0% of kernels (0.00 ms/step unresolved)
 
 site                               op                       launches/step   ms/step  top kernel
-model.py:168 : all_reduce_         record_param_comms                91.0    55.546  ncclDevKernel_AllReduce_Sum_f32_RING_LL(
-kernel_gemv.py:170 : fp8_gemv      fp8_gemv_kernel                  290.0     3.169  fp8_gemv_kernel
+model.py:219 : all_reduce_         record_param_comms                91.0   215.526  ncclDevKernel_AllReduce_Sum_f32_RING_LL(
+kernel_gemv.py:170 : fp8_gemv      fp8_gemv_kernel                  290.0     3.120  fp8_gemv_kernel
 kernel.py:191 : __call__           sparse_attn_kernel__kern          40.0     2.745  sparse_attn_kernel__kernel
-grouped_moe.py:497 : routed        _w13                              40.0     2.439  _w13
-grouped_moe.py:497 : routed        _w2                               40.0     1.864  _w2
-kernel.py:191 : __call__           act_quant_kernel__kernel         410.0     1.026  act_quant_kernel__kernel
-model.py:1605 : forward            record_param_comms                 1.0     0.662  ncclDevKernel_AllGather_RING_LL(ncclDevK
-model.py:1263 : forward            aten::copy_                       80.0     0.548  void at::native::unrolled_elementwise_ke
+grouped_moe.py:497 : routed        _w13                              40.0     2.471  _w13
+grouped_moe.py:497 : routed        _w2                               40.0     1.873  _w2
+model.py:1741 : forward            record_param_comms                 1.0     1.551  ncclDevKernel_AllGather_RING_LL(ncclDevK
+kernel.py:191 : __call__           act_quant_kernel__kernel         290.0     0.724  act_quant_kernel__kernel
 hc_kernels.py:293 : hc_mixes_decod aten::mm                         160.0     0.438  void dot_kernel
-model.py:1263 : forward            aten::topk                        80.0     0.438  void at::native::sbtopk::gatherTopK
-model.py:1209 : forward            aten::bmm                         40.0     0.344  nvjet_sm90_tst_64x8_64x16_4x1_v_bz_TNT
-norm_kernels.py:82 : rms_norm_fuse aten::mean                       165.4     0.330  void at::native::reduce_kernel
-kernel.py:191 : __call__           hc_split_sinkhorn_kernel          80.0     0.327  hc_split_sinkhorn_kernel__kernel
-hc_kernels.py:293 : hc_mixes_decod aten::mean                        80.0     0.304  void at::native::reduce_kernel
-model.py:430 : linear              aten::mm                          66.2     0.281  std::enable_if
-model.py:1295 : forward            aten::copy_                      120.0     0.220  void at::native::unrolled_elementwise_ke
-model.py:888 : forward             aten::sort                         8.0     0.214  void at::native::radixSortKVInPlace
-model.py:1605 : forward            aten::mm                           1.0     0.195  void gemv2T_kernel_val
-norm_kernels.py:82 : rms_norm_fuse _rms_apply_kernel                165.4     0.188  _rms_apply_kernel
-norm_kernels.py:82 : rms_norm_fuse _square_cast_kernel              165.4     0.153  _square_cast_kernel
-model.py:538 : forward             aten::copy_                       80.0     0.145  void at::native::unrolled_elementwise_ke
-model.py:1209 : forward            aten::cat                         76.0     0.144  void at::native::(anonymous namespace)::
-hc_kernels.py:224 : hc_post_fused  _hc_post_kernel                   80.0     0.134  _hc_post_kernel
-model.py:1390 : _forward           aten::add_                        40.0     0.123  void at::native::unrolled_elementwise_ke
-rope_kernels.py:136 : rope_apply_  _rope_kernel                     132.4     0.117  _rope_kernel
-model.py:888 : forward             aten::topk                         8.0     0.105  void at::native::sbtopk::gatherTopK
+model.py:1369 : forward            aten::topk                        80.0     0.437  void at::native::sbtopk::gatherTopK
+model.py:481 : linear              aten::mm                          66.2     0.343  std::enable_if
+model.py:1267 : forward            aten::bmm                         40.0     0.343  nvjet_sm90_tst_64x8_64x16_4x1_v_bz_TNT
+norm_kernels.py:82 : rms_norm_fuse aten::mean                       165.4     0.339  void at::native::reduce_kernel
+kernel.py:191 : __call__           hc_split_sinkhorn_kernel          80.0     0.326  hc_split_sinkhorn_kernel__kernel
+hc_kernels.py:293 : hc_mixes_decod aten::mean                        80.0     0.311  void at::native::reduce_kernel
+model.py:946 : forward             aten::sort                         8.0     0.214  void at::native::radixSortKVInPlace
+model.py:1741 : forward            aten::mm                           1.0     0.195  void gemv2T_kernel_val
+norm_kernels.py:82 : rms_norm_fuse _rms_apply_kernel                165.4     0.189  _rms_apply_kernel
+norm_kernels.py:82 : rms_norm_fuse _square_cast_kernel              165.4     0.156  _square_cast_kernel
+model.py:1267 : forward            aten::cat                         76.0     0.145  void at::native::(anonymous namespace)::
+model.py:596 : forward             aten::copy_                       80.0     0.139  void at::native::unrolled_elementwise_ke
+hc_kernels.py:224 : hc_post_fused  _hc_post_kernel                   80.0     0.133  _hc_post_kernel
+moe_kernels.py:79 : swiglu_route   _swiglu_route_kernel              80.0     0.133  _swiglu_route_kernel
+model.py:1511 : _forward           aten::add_                        40.0     0.124  void at::native::unrolled_elementwise_ke
+rope_kernels.py:136 : rope_apply_  _rope_kernel                     132.4     0.116  _rope_kernel
+model.py:946 : forward             aten::topk                         8.0     0.105  void at::native::sbtopk::gatherTopK
 grouped_moe.py:497 : routed        _combine                          40.0     0.098  _combine
+model.py:1369 : forward            aten::copy_                       40.0     0.096  void at::native::unrolled_elementwise_ke
 hc_kernels.py:211 : hc_pre_fused   _hc_pre_kernel                    81.0     0.089  _hc_pre_kernel
-model.py:1263 : forward            aten::add                         80.0     0.089  void at::native::vectorized_elementwise_
-hc_kernels.py:293 : hc_mixes_decod _hc_stream_cast_square_k          80.0     0.089  _hc_stream_cast_square_kernel
-model.py:1295 : forward            aten::clamp                       80.0     0.088  void at::native::vectorized_elementwise_
-model.py:1263 : forward            aten::sum                         40.0     0.084  void at::native::reduce_kernel
-model.py:1093 : _window_kv         aten::index_copy_                 40.0     0.082  void at::native::index_elementwise_kerne
-model.py:1209 : forward            aten::index_select                40.0     0.076  void at::native::(anonymous namespace)::
-hc_kernels.py:293 : hc_mixes_decod _hc_scale_by_rstd_kernel          80.0     0.075  _hc_scale_by_rstd_kernel
-moe_kernels.py:73 : swiglu_route   _swiglu_route_kernel              40.0     0.074  _swiglu_route_kernel
-model.py:1263 : forward            aten::softplus                    40.0     0.068  void at::native::vectorized_elementwise_
-model.py:1263 : forward            aten::gather                      40.0     0.059  void at::native::_scatter_gather_element
-model.py:1093 : _window_kv         aten::remainder                   40.0     0.054  void at::native::vectorized_elementwise_
-model.py:1295 : forward            aten::silu                        40.0     0.051  void at::native::vectorized_elementwise_
-model.py:1263 : forward            aten::div_                        40.0     0.050  void at::native::elementwise_kernel
-model.py:1263 : forward            aten::sqrt                        40.0     0.049  void at::native::vectorized_elementwise_
-model.py:1390 : _forward           aten::copy_                       40.0     0.042  void at::native::vectorized_elementwise_
+hc_kernels.py:293 : hc_mixes_decod _hc_stream_cast_square_k          80.0     0.087  _hc_stream_cast_square_kernel
+model.py:1151 : _window_kv         aten::index_copy_                 40.0     0.086  void at::native::index_elementwise_kerne
+model.py:1369 : forward            aten::add                         80.0     0.085  void at::native::vectorized_elementwise_
+model.py:1369 : forward            aten::sum                         40.0     0.080  void at::native::reduce_kernel
+hc_kernels.py:293 : hc_mixes_decod _hc_scale_by_rstd_kernel          80.0     0.076  _hc_scale_by_rstd_kernel
+model.py:1267 : forward            aten::index_select                40.0     0.075  void at::native::(anonymous namespace)::
+model.py:1369 : forward            aten::softplus                    40.0     0.069  void at::native::vectorized_elementwise_
+model.py:1369 : forward            aten::gather                      40.0     0.059  void at::native::_scatter_gather_element
+model.py:1151 : _window_kv         aten::remainder                   40.0     0.054  void at::native::vectorized_elementwise_
+model.py:1369 : forward            aten::sqrt                        40.0     0.049  void at::native::vectorized_elementwise_
+model.py:1369 : forward            aten::div_                        40.0     0.044  void at::native::elementwise_kernel
+model.py:1369 : forward            aten::div                         40.0     0.043  void at::native::vectorized_elementwise_
 kernel.py:191 : __call__           fp4_quant_kernel__kernel          12.4     0.042  fp4_quant_kernel__kernel
-model.py:1263 : forward            aten::div                         40.0     0.040  void at::native::vectorized_elementwise_
-model.py:1295 : forward            aten::mul                         40.0     0.038  void at::native::vectorized_elementwise_
-model.py:1263 : forward            aten::mul_                        40.0     0.036  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::copy_                       12.0     0.034  void at::native::unrolled_elementwise_ke
-model.py:888 : forward             aten::bmm                          8.0     0.029  void gemmSN_TN_kernel
-model.py:2201 : sample             aten::argmax                       1.0     0.027  void at::native::reduce_kernel
-model.py:888 : forward             aten::mul                         16.0     0.027  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::ge                           8.0     0.023  void at::native::elementwise_kernel
-model.py:976 : select_candidate_bl aten::topk                         2.0     0.022  void at::native::sbtopk::gatherTopK
-model.py:888 : forward             aten::sum                          8.0     0.021  void at::native::reduce_kernel
-model.py:888 : forward             aten::add                         20.4     0.020  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::mean                         4.0     0.016  void at::native::reduce_kernel
-model.py:685 : forward             aten::mul                         14.0     0.015  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::index_select                10.2     0.015  void at::native::(anonymous namespace)::
-model.py:888 : forward             aten::lt                           8.0     0.014  void at::native::elementwise_kernel
-model.py:2134 : forward            aten::mean                         3.0     0.014  void at::native::reduce_kernel
-model.py:888 : forward             aten::floor_divide                10.2     0.013  void at::native::vectorized_elementwise_
-model.py:799 : forward             aten::index_copy_                  6.0     0.013  void at::native::index_elementwise_kerne
-model.py:888 : forward             aten::copy_                        8.0     0.012  void at::native::unrolled_elementwise_ke
-model.py:888 : forward             aten::masked_fill_                12.0     0.012  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::clamp_min_                   8.0     0.011  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::where                        8.0     0.010  void at::native::elementwise_kernel
-model.py:799 : forward             aten::copy_                        4.2     0.008  void at::native::unrolled_elementwise_ke
+model.py:1511 : _forward           aten::copy_                       40.0     0.042  void at::native::vectorized_elementwise_
+model.py:1369 : forward            aten::mul_                        40.0     0.036  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::copy_                       12.0     0.035  void at::native::unrolled_elementwise_ke
+model.py:946 : forward             aten::bmm                          8.0     0.029  void gemmSN_TN_kernel
+model.py:2337 : sample             aten::argmax                       1.0     0.027  void at::native::reduce_kernel
+model.py:946 : forward             aten::mul                         16.0     0.027  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::ge                           8.0     0.023  void at::native::elementwise_kernel
+model.py:1034 : select_candidate_b aten::topk                         2.0     0.022  void at::native::sbtopk::gatherTopK
+model.py:946 : forward             aten::sum                          8.0     0.022  void at::native::reduce_kernel
+model.py:946 : forward             aten::add                         20.4     0.020  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::mean                         4.0     0.016  void at::native::reduce_kernel
+model.py:743 : forward             aten::mul                         14.0     0.015  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::index_select                10.2     0.015  void at::native::(anonymous namespace)::
+model.py:946 : forward             aten::lt                           8.0     0.014  void at::native::elementwise_kernel
+model.py:2270 : forward            aten::mean                         3.0     0.014  void at::native::reduce_kernel
+model.py:946 : forward             aten::floor_divide                10.2     0.014  void at::native::vectorized_elementwise_
+model.py:857 : forward             aten::index_copy_                  6.0     0.013  void at::native::index_elementwise_kerne
+model.py:946 : forward             aten::copy_                        8.0     0.012  void at::native::unrolled_elementwise_ke
+model.py:946 : forward             aten::masked_fill_                12.0     0.012  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::clamp_min_                   8.0     0.011  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::where                        8.0     0.010  void at::native::elementwise_kernel
 engram.py:159 : forward            aten::bitwise_or                   8.0     0.008  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::sum                          2.0     0.008  void at::native::reduce_kernel
-model.py:888 : forward             aten::arange                      10.2     0.007  void (anonymous namespace)::elementwise_
-model.py:644 : forward             aten::masked_fill_                 4.0     0.007  void at::native::vectorized_elementwise_
+model.py:857 : forward             aten::copy_                        4.2     0.008  void at::native::unrolled_elementwise_ke
+model.py:743 : forward             aten::sum                          2.0     0.008  void at::native::reduce_kernel
+model.py:946 : forward             aten::arange                      10.2     0.007  void (anonymous namespace)::elementwise_
+model.py:702 : forward             aten::masked_fill_                 4.0     0.006  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::gather                       4.0     0.006  void at::native::_scatter_gather_element
-model.py:685 : forward             aten::add                          6.0     0.006  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::fill_                        8.0     0.006  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::bitwise_not                  4.0     0.005  void at::native::vectorized_elementwise_
-model.py:799 : forward             aten::sum                          1.2     0.005  void at::native::reduce_kernel
-model.py:685 : forward             aten::rsqrt                        4.0     0.005  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::fill_                        8.0     0.006  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::add                          6.0     0.006  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::bitwise_not                  4.0     0.005  void at::native::vectorized_elementwise_
+model.py:857 : forward             aten::sum                          1.2     0.005  void at::native::reduce_kernel
 engram.py:159 : forward            aten::where                        4.0     0.005  void at::native::vectorized_elementwise_
-model.py:1166 : _compress_kv       aten::index_copy_                  2.2     0.005  void at::native::index_elementwise_kerne
-engram.py:159 : forward            aten::remainder                    3.0     0.004  void at::native::elementwise_kernel
-model.py:1166 : _compress_kv       aten::add                          4.4     0.004  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::pow                          4.0     0.004  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::rsqrt                        4.0     0.005  void at::native::vectorized_elementwise_
+model.py:1224 : _compress_kv       aten::index_copy_                  2.2     0.005  void at::native::index_elementwise_kerne
+engram.py:159 : forward            aten::remainder                    3.0     0.005  void at::native::elementwise_kernel
+model.py:1224 : _compress_kv       aten::add                          4.4     0.004  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::pow                          4.0     0.004  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::clamp_min                    4.0     0.004  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::lt                           4.0     0.004  void at::native::vectorized_elementwise_
-engram.py:159 : forward            aten::sub                          4.0     0.004  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::eq                           4.0     0.004  void at::native::vectorized_elementwise_
-model.py:799 : forward             aten::remainder                    3.0     0.004  void at::native::vectorized_elementwise_
+engram.py:159 : forward            aten::sub                          4.0     0.004  void at::native::vectorized_elementwise_
+model.py:857 : forward             aten::remainder                    3.0     0.004  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::fill_                        5.0     0.004  void at::native::vectorized_elementwise_
-model.py:417 : forward             aten::masked_fill_                 2.0     0.003  void at::native::vectorized_elementwise_
-model.py:1166 : _compress_kv       aten::index_select                 2.2     0.003  void at::native::(anonymous namespace)::
-model.py:1166 : _compress_kv       aten::floor_divide                 2.2     0.003  void at::native::vectorized_elementwise_
+model.py:468 : forward             aten::masked_fill_                 2.0     0.003  void at::native::vectorized_elementwise_
+model.py:1224 : _compress_kv       aten::index_select                 2.2     0.003  void at::native::(anonymous namespace)::
+model.py:1224 : _compress_kv       aten::floor_divide                 2.2     0.003  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::index_copy_                  2.2     0.003  void at::native::index_elementwise_kerne
 engram.py:159 : forward            aten::bitwise_xor                  3.0     0.003  void at::native::elementwise_kernel
-model.py:888 : forward             aten::index_copy_                  2.2     0.003  void at::native::index_elementwise_kerne
-model.py:976 : select_candidate_bl aten::amax                         1.0     0.003  void at::native::reduce_kernel
-model.py:644 : forward             aten::bitwise_or                   2.0     0.003  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::remainder                    2.0     0.003  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::sqrt                         2.0     0.003  void at::native::vectorized_elementwise_
-model.py:644 : forward             aten::lt                           2.0     0.002  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::sigmoid                      2.0     0.002  void at::native::vectorized_elementwise_
-model.py:1605 : forward            aten::copy_                        1.0     0.002  void at::native::unrolled_elementwise_ke
-model.py:976 : select_candidate_bl aten::scatter_                     1.0     0.002  void at::native::_scatter_gather_element
-model.py:799 : forward             aten::_softmax                     1.2     0.002  void at::native::(anonymous namespace)::
+model.py:1034 : select_candidate_b aten::amax                         1.0     0.003  void at::native::reduce_kernel
+model.py:743 : forward             aten::sqrt                         2.0     0.003  void at::native::vectorized_elementwise_
+model.py:807 : get_window_topk_idx aten::remainder                    2.0     0.003  void at::native::vectorized_elementwise_
+model.py:1741 : forward            aten::copy_                        1.0     0.003  void at::native::unrolled_elementwise_ke
+model.py:702 : forward             aten::bitwise_or                   2.0     0.003  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::sigmoid                      2.0     0.002  void at::native::vectorized_elementwise_
+model.py:702 : forward             aten::lt                           2.0     0.002  void at::native::vectorized_elementwise_
+model.py:1034 : select_candidate_b aten::scatter_                     1.0     0.002  void at::native::_scatter_gather_element
 engram.py:159 : forward            aten::cat                          2.0     0.002  void at::native::(anonymous namespace)::
-model.py:621 : _gather_cpu         aten::copy_                        2.0     0.002  void at::native::vectorized_elementwise_
-model.py:2134 : forward            aten::copy_                        1.0     0.002  void at::native::elementwise_kernel
-model.py:685 : forward             aten::clamp_min                    2.0     0.002  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::add                          2.0     0.002  void at::native::vectorized_elementwise_
-model.py:1166 : _compress_kv       aten::sub                          2.2     0.002  void at::native::vectorized_elementwise_
-model.py:644 : forward             aten::ge                           2.0     0.002  void at::native::vectorized_elementwise_
-model.py:888 : forward             aten::sub                          2.2     0.002  void at::native::vectorized_elementwise_
+model.py:857 : forward             aten::_softmax                     1.2     0.002  void at::native::(anonymous namespace)::
+model.py:743 : forward             aten::clamp_min                    2.0     0.002  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::index                        1.0     0.002  void at::native::index_elementwise_kerne
-model.py:417 : forward             aten::index_select                 1.0     0.002  void at::native::(anonymous namespace)::
-model.py:685 : forward             aten::copysign                     2.0     0.002  void at::native::vectorized_elementwise_
-model.py:644 : forward             aten::sub                          2.0     0.002  void at::native::vectorized_elementwise_
-model.py:685 : forward             aten::abs                          2.0     0.002  void at::native::vectorized_elementwise_
-model.py:976 : select_candidate_bl aten::copy_                        1.0     0.002  void at::native::elementwise_kernel
-model.py:976 : select_candidate_bl aten::fill_                        2.0     0.002  void at::native::vectorized_elementwise_
-model.py:976 : select_candidate_bl aten::eq                           1.0     0.002  void at::native::elementwise_kernel
-model.py:2134 : forward            aten::cat                          1.0     0.002  void at::native::(anonymous namespace)::
-model.py:1166 : _compress_kv       aten::arange                       2.2     0.002  void (anonymous namespace)::elementwise_
-model.py:1776 : make_identity_pre_ aten::fill_                        2.0     0.002  void at::native::vectorized_elementwise_
-model.py:1605 : forward            aten::cat                          1.0     0.001  void at::native::(anonymous namespace)::
-model.py:976 : select_candidate_bl aten::masked_fill_                 1.0     0.001  void at::native::vectorized_elementwise_
-model.py:799 : forward             aten::mul                          1.2     0.001  void at::native::vectorized_elementwise_
+model.py:679 : _gather_cpu         aten::copy_                        2.0     0.002  void at::native::vectorized_elementwise_
+model.py:946 : forward             aten::sub                          2.2     0.002  void at::native::vectorized_elementwise_
+model.py:1224 : _compress_kv       aten::sub                          2.2     0.002  void at::native::vectorized_elementwise_
+model.py:2270 : forward            aten::copy_                        1.0     0.002  void at::native::elementwise_kernel
+model.py:743 : forward             aten::copysign                     2.0     0.002  void at::native::vectorized_elementwise_
+model.py:468 : forward             aten::index_select                 1.0     0.002  void at::native::(anonymous namespace)::
+model.py:702 : forward             aten::ge                           2.0     0.002  void at::native::vectorized_elementwise_
+model.py:807 : get_window_topk_idx aten::add                          2.0     0.002  void at::native::vectorized_elementwise_
+model.py:702 : forward             aten::sub                          2.0     0.002  void at::native::vectorized_elementwise_
+model.py:743 : forward             aten::abs                          2.0     0.002  void at::native::vectorized_elementwise_
+model.py:1034 : select_candidate_b aten::eq                           1.0     0.002  void at::native::elementwise_kernel
+model.py:1034 : select_candidate_b aten::copy_                        1.0     0.002  void at::native::elementwise_kernel
+model.py:1034 : select_candidate_b aten::fill_                        2.0     0.002  void at::native::vectorized_elementwise_
+model.py:1912 : make_identity_pre_ aten::fill_                        2.0     0.002  void at::native::vectorized_elementwise_
+model.py:1224 : _compress_kv       aten::arange                       2.2     0.002  void (anonymous namespace)::elementwise_
+model.py:2270 : forward            aten::cat                          1.0     0.001  void at::native::(anonymous namespace)::
+model.py:1034 : select_candidate_b aten::masked_fill_                 1.0     0.001  void at::native::vectorized_elementwise_
+model.py:1741 : forward            aten::cat                          1.0     0.001  void at::native::(anonymous namespace)::
+model.py:857 : forward             aten::mul                          1.2     0.001  void at::native::vectorized_elementwise_
+model.py:1034 : select_candidate_b aten::floor_divide                 1.0     0.001  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::mul                          1.0     0.001  void at::native::elementwise_kernel
-model.py:976 : select_candidate_bl aten::floor_divide                 1.0     0.001  void at::native::vectorized_elementwise_
 engram.py:159 : forward            aten::add                          1.0     0.001  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::copy_                        1.0     0.001  void at::native::unrolled_elementwise_ke
-model.py:976 : select_candidate_bl aten::gt                           1.0     0.001  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::gt                           1.0     0.001  void at::native::elementwise_kernel
-model.py:417 : forward             aten::lt                           1.0     0.001  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::where                        1.0     0.001  void at::native::elementwise_kernel
-model.py:417 : forward             aten::bitwise_or                   1.0     0.001  void at::native::vectorized_elementwise_
-model.py:417 : forward             aten::ge                           1.0     0.001  void at::native::vectorized_elementwise_
-model.py:976 : select_candidate_bl aten::sub                          1.0     0.001  void at::native::vectorized_elementwise_
-model.py:417 : forward             aten::sub                          1.0     0.001  void at::native::vectorized_elementwise_
-model.py:2134 : forward            aten::fill_                        1.0     0.001  void at::native::vectorized_elementwise_
-model.py:976 : select_candidate_bl aten::arange                       1.0     0.001  void (anonymous namespace)::elementwise_
+model.py:807 : get_window_topk_idx aten::gt                           1.0     0.001  void at::native::elementwise_kernel
+model.py:807 : get_window_topk_idx aten::copy_                        1.0     0.001  void at::native::unrolled_elementwise_ke
+model.py:1034 : select_candidate_b aten::gt                           1.0     0.001  void at::native::vectorized_elementwise_
+model.py:807 : get_window_topk_idx aten::where                        1.0     0.001  void at::native::elementwise_kernel
+model.py:468 : forward             aten::bitwise_or                   1.0     0.001  void at::native::vectorized_elementwise_
+model.py:468 : forward             aten::lt                           1.0     0.001  void at::native::vectorized_elementwise_
+model.py:468 : forward             aten::ge                           1.0     0.001  void at::native::vectorized_elementwise_
+model.py:1034 : select_candidate_b aten::sub                          1.0     0.001  void at::native::vectorized_elementwise_
+model.py:468 : forward             aten::sub                          1.0     0.001  void at::native::vectorized_elementwise_
+model.py:2270 : forward            aten::fill_                        1.0     0.001  void at::native::vectorized_elementwise_
+model.py:1034 : select_candidate_b aten::arange                       1.0     0.001  void (anonymous namespace)::elementwise_
+model.py:807 : get_window_topk_idx aten::fill_                        1.0     0.001  void at::native::vectorized_elementwise_
+model.py:807 : get_window_topk_idx aten::arange                       1.0     0.001  void (anonymous namespace)::elementwise_
 engram.py:159 : forward            aten::arange                       1.0     0.001  void (anonymous namespace)::elementwise_
-model.py:749 : get_window_topk_idx aten::fill_                        1.0     0.001  void at::native::vectorized_elementwise_
-model.py:749 : get_window_topk_idx aten::arange                       1.0     0.001  void (anonymous namespace)::elementwise_

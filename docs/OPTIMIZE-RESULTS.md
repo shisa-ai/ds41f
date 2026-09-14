@@ -866,6 +866,18 @@ Non-collective kernel time, by issuing function, from
 | `rope_apply_` | 0.117 | 132 | the fused rotary kernel |
 | **total** | **17.64** | **3,620** | plus 92 NCCL launches, which this trace exposes |
 
+A later pass re-ran the same analysis on the same configuration after four more
+decode changes, and the file is kept as its own artifact
+(`results/decode-stacks-attribution-moe-eager.txt`) rather than overwriting the one
+above: **3,896 -> 3,496 launches/step**, non-collective kernel time 17.64 -> 16.89
+ms/step, and `act_quant` 410 launches at 1.026 ms/step -> **290 at 0.724**. The two
+rows that moved most are `Gate.forward`, 1.46 -> **0.998** in 480 launches, and
+`Expert.forward`, 0.397 -> **0.08**, because both were fused or cached. One caveat on
+that run: its NCCL row reads 215 ms/step against 55 in the trace above, which is a
+contention artifact of the run rather than a change -- the total kernel time exceeds
+the step time, so those durations are mostly spin-wait. The non-collective rows are
+the ones to read, and they are consistent with the A/B measurements.
+
 Three things this changes:
 
 - The two `aten::mean` sites are **0.63 ms/step together** (2.3%), and both exist
@@ -1858,6 +1870,14 @@ cd ../serve && $PY --nproc-per-node 4 verify_placement_dispatch.py --ckpt /data/
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _RMSNORM_FUSED --repeats 3
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py \
   --flag _RMSNORM_FUSED,_HC_FUSED_DECODE,moe_kernels._MOE_SWIGLU_FUSED --repeats 3
+# the last four decode changes, and the act_quant buffer cache (opt-in)
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _ROPE_FUSED --repeats 4
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _GATE_WEIGHT_CACHE --repeats 4
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _EXPERT_SWIGLU_FUSED --repeats 4
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _MOE_SHARED_QUANT --repeats 4
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py --flag _ATTN_SHARED_QUANT --repeats 7
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py \
+  --flag kernel._ACT_QUANT_CACHE_ENABLED --repeats 4
 
 # bitwise on/off comparison, and the control that validates the harness itself
 DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py --flag _RMSNORM_FUSED --steps 64
@@ -1866,12 +1886,28 @@ DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py --flag _HC
 # kernel-level exactness against the reference expression (one GPU)
 CUDA_VISIBLE_DEVICES=0 python check_rms_norm.py 200 3
 CUDA_VISIBLE_DEVICES=0 python check_moe_swiglu_exact.py
+CUDA_VISIBLE_DEVICES=0 python check_expert_swiglu_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_mixes_decode.py
 CUDA_VISIBLE_DEVICES=0 python check_act_quant_cache.py
+CUDA_VISIBLE_DEVICES=0 python check_gate_weight_cache.py
 CUDA_VISIBLE_DEVICES=0 python probe_host_dispatch.py
 CUDA_VISIBLE_DEVICES=0 python probe_rsqrt.py
 CUDA_VISIBLE_DEVICES=0 python probe_swiglu_steps.py
+
+# how many act_quant calls in one decode step re-quantize an input another call in
+# the same step already quantized, with the call sites. Eager, and with the MoE's own
+# decode graph bypassed -- a replay has no Python-level act_quant and the count is 7.
+# Compare against DSV41F_MOE_SHARED_QUANT=0 / DSV41F_ATTN_SHARED_QUANT=0.
+DSV41F_STEP_GRAPHS=0 $PY --nproc-per-node 4 probe_quant_dupes.py
+
+# which function issued each decode kernel. The profile and the analysis are separate
+# runs: the first writes a trace, the second reads it in seconds.
+# DSV41F_PROFILE_MOE_EAGER=1 bypasses the MoE's own decode graph so its launches
+# attribute to their real call sites instead of all landing on MoE.forward.
+DSV41F_PROFILE_MOE_EAGER=1 DSV41F_STEP_GRAPHS=0 $PY --nproc-per-node 4 \
+  profile_decode_stacks.py --prompt-len 2048 --steps 5
+python analyze_decode_stacks.py --latest --steps 5 --top 40
 
 # component profiles
 $PY --nproc-per-node 4 profile_prefill.py
