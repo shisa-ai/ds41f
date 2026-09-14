@@ -44,6 +44,7 @@ Remaining work and follow-up status:
 | Decode rotary embedding | **Fused, 2.3% lower decode latency at identical tokens.** The largest single unfused item in the step's op attribution (0.68 ms/step of `copy_` and `mul`), called 198 times per step in three launches each. One launch per call now, bit-identical to the reference at the contracted product form. Decode only; prefill is untouched. See [Fused rotary embedding](#fused-rotary-embedding). |
 | Cached fp32 gate weight | **Cached, 1.65% lower decode latency at identical tokens.** The gate GEMV runs in fp32, so `Gate.forward` upcast the bf16 routing weight on every one of 40 layers of every step: exact, but 8.5 µs of GPU time per layer for a constant. 27.540 -> 27.085 ms/step. The attribution that found it needed the MoE's own decode graph bypassed, which is why the kernel-name view had the routing at 0.67 ms/step rather than 1.46. See [Caching the routing weight cast](#caching-the-routing-weight-cast). |
 | Shared-expert SwiGLU tail | **Fused, 1.67% lower decode latency at identical tokens.** Seven launches per layer for a `[1, 2304]` tensor (two casts, two clamps, silu, multiply, cast back), 0.397 ms/step. The routed experts already compute the same expression in one launch, so that kernel is reused, with `weights=None` to skip the multiply. 27.053 -> 26.602 ms/step, 240 launches/step fewer. See [Fusing the shared expert's SwiGLU tail](#fusing-the-shared-experts-swiglu-tail). |
+| Shared MoE input quantization | **Shared, 0.92% lower decode latency at identical tokens.** The MoE's input row is read by three quantized weights (`_w13` and the shared expert's `w1`/`w3`) and each quantized it for itself. A probe counted 410 `act_quant` calls in a decode step over 282 distinct inputs, so 128 redundant, 80 of them this row. 26.560 -> 26.316 ms/step, and the probe confirms the mechanism: 410 -> 330 calls, 128 -> 48 redundant. See [Quantizing the MoE's input row once](#quantizing-the-moes-input-row-once). |
 | DSpark | Source-level feasibility analysis is complete in [OPTIMIZE.md](OPTIMIZE.md#dspark-feasibility-assessment--september-13-2026). A working verifier and runtime performance measurements remain open. |
 | Custom / symmetric-memory collectives | **Integrated, opt-in, 4.8% on the served decode step.** Custom allreduce is capturable and 1.3-1.6x faster than graphed NCCL at decode sizes; routed through the engine it takes the served step from 29.0 to 27.6 ms. It requires `DSV41F_EXPANDABLE_SEGMENTS=0` (its graph-buffer registration cannot export expandable-segment memory) and stays off by default because it changes generated tokens on a near-tie-sensitive model. See [Collectives](#collectives). |
 | Served latency (HTTP/SSE) | **Measured.** Decode 28.48 ms per step at batch 1 against the model loop's 26.96 ms at the same 61-token context, so the serving path adds ~1.5 ms/step. Prompt processing is 2,922 tok/s served against ~2,900 tok/s model-loop at 3,646 tokens. Concurrency is measured: see [Served latency](#served-latency). |
@@ -643,6 +644,7 @@ The checks are listed in [Verification](#verification).
 | Fused rotary embedding | 3/call | 1/call | ~396 | +0.660 | +2.3% | identical |
 | Cached fp32 gate weight | 1 cast/layer | 0/layer | 40 | +0.456 | +1.65% | identical |
 | Fused shared-expert SwiGLU tail | 7/layer | 1/layer | 240 | +0.450 | +1.67% | identical |
+| Shared MoE input quantization | 3/layer | 1/layer | 80 | +0.244 | +0.92% | identical |
 
 The per-change rows are separate interleaved A/B runs (three repeats each, worst
 rank) at B=1, 2K context, `DSV41F_ENGRAM_OFFLOAD=1`
@@ -965,6 +967,49 @@ parity is prefill logits bit-equal over 66,191,360 values and no differing token
 64 steps. `DSV41F_EXPERT_SWIGLU_FUSED=0` restores the reference chain. Decode only:
 at prefill the same seven launches are amortised over the whole prompt, and the
 last-position parity gate is sensitive to prefill changes.
+
+### Quantizing the MoE's input row once
+
+The three weights that read the MoE's input row at decode -- the routed `_w13` and the
+shared expert's `w1` and `w3` -- each quantize their own input, so the row was
+quantized three times per layer.
+
+That count is from `probe_quant_dupes.py`, which wraps `act_quant` for one eager
+decode step and reports how many calls re-quantize an input another call in the same
+step already quantized. **410 calls over 282 distinct input tensors, so 128
+redundant, and 80 of those 128 are this row** (40 layers x 2). Two details make the
+count trustworthy: the probe **holds a reference to every input**, because the
+caching allocator otherwise hands the same address to different activations and
+reports duplicates that are not there, and it runs with the step graphs *and* the
+MoE's own decode graph bypassed, because a replay has no Python-level `act_quant`
+and the count comes out at 7.
+
+The fix is to quantize once in `MoE._forward` and pass the pair down, which is a
+no-op numerically: `act_quant` is a pure function of the row and all three call
+sites pass the same module parameters (`32`, `"ue8m0"`, `e8m0`). `linear()`,
+`Linear.forward` and `Expert.forward` gained an optional pre-computed pair, and
+`GroupedMoE.routed` accepts one; the sharing is guarded on
+`g.quantizer is act_quant`, since `GroupedMoE` accepts an injected quantizer while
+the shared expert always goes through `linear`.
+
+The probe confirms the mechanism rather than only the timing: **410 -> 330 calls and
+128 -> 48 redundant**. Interleaved A/B, four repeats: **26.316 ms/step shared against
+26.560 not, +0.244 ms/step (+0.92%)**, identical tokens, and real-model parity is
+prefill logits bit-equal over 66,191,360 values with no differing token in 64 steps.
+`DSV41F_MOE_SHARED_QUANT=0` restores the per-weight quantization.
+
+The remaining 48 redundant calls are in the attention path, where the four consumers
+of the block's input are separate methods (`_window_kv`, `_compress_kv`, the indexer)
+and the pair would have to be threaded through three signatures. Measured, not taken.
+
+There is a cheaper way to remove all 128 that was also measured and **not** taken:
+the pre-existing `DSV41F_ACT_QUANT_CACHE=1`, which reuses the compiled kernel and the
+output buffers across calls of the same shape, is worth **+0.271 ms/step (+1.01%)** at
+identical tokens. It stays off by default because it returns *shared* buffers, so it
+is safe only where every consumer is enqueued immediately after its producer on one
+stream -- an assumption rather than a guarantee, and one the MoE's graph build breaks
+by capturing on a side stream. That number is new here; the flag was documented as
+saving ~9 us of host time per call without an end-to-end figure.
 
 ### Why the reductions stayed in torch
 
@@ -1627,6 +1672,13 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   reference skips the clamps -- and gets 0 of 138,240 bf16 elements differing, over
   random draws, inputs pinned to the clamp and one ulp either side of it, and
   saturating inputs where silu's `exp` overflows.
+- `probe_quant_dupes.py` counts how many `act_quant` calls in one eager decode step
+  re-quantize an input another call in the same step already quantized, and names the
+  call sites. It holds a reference to every input so `id()` is exact, since the
+  caching allocator otherwise hands the same address to different activations, and it
+  bypasses the step graphs and the MoE's own decode graph, since a replay has no
+  Python-level `act_quant` at all. It is the measurement behind the shared MoE input
+  quantization, and it re-measures the mechanism after the change.
 - `check_gate_weight_cache.py` covers the one decode change that is exact by
   construction and so has no numeric gate: the cached fp32 routing weight. It
   compares bit patterns against the uncached expression after each way the weight
