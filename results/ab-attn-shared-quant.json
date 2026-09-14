@@ -1,0 +1,37 @@
+{
+  "change": "quantize the attention block's input once for wq_a and wkv",
+  "flag": "_ATTN_SHARED_QUANT",
+  "harness": "bench_ab.py --flag _ATTN_SHARED_QUANT",
+  "env": "DSV41F_ENGRAM_OFFLOAD=1, TP4, B=1, 2048 context, worst rank",
+  "runs": [
+    {
+      "repeats": 4,
+      "on_ms_per_step": [26.106, 26.190, 26.239, 26.275],
+      "off_ms_per_step": [26.304, 26.318, 26.387, 26.269],
+      "on_median": 26.215,
+      "off_median": 26.311,
+      "delta_ms_per_step": 0.097,
+      "delta_percent_latency": 0.37,
+      "arms_overlap": true
+    },
+    {
+      "repeats": 7,
+      "on_ms_per_step": [26.168, 26.286, 26.139, 26.088, 26.030, 26.128, 26.086],
+      "off_ms_per_step": [26.170, 26.393, 26.278, 26.263, 26.285, 26.248, 26.256],
+      "on_median": 26.128,
+      "off_median": 26.263,
+      "delta_ms_per_step": 0.136,
+      "delta_percent_latency": 0.52,
+      "arms_overlap": true
+    }
+  ],
+  "accepted_on": "the 7-repeat run; 0.10-0.14 ms over 40 calls is 2.4-3.4 us each, the act_quant GPU figure plus host cost, so the size is what the mechanism predicts and the spread is the machine's",
+  "act_quant_calls_per_step": {"on": 290, "off": 330},
+  "act_quant_redundant_calls_per_step": {"on": 8, "off": 48},
+  "act_quant_distinct_inputs_per_step": 282,
+  "identical_tokens": true,
+  "exactness": {
+    "probe_quant_dupes.py": "330 -> 290 calls and 48 -> 8 redundant, distinct inputs unchanged at 282",
+    "check_decode_parity.py": "prefill logits bit-equal 66191360/66191360, decode logits bit-equal at every step, first differing token step = None (64 steps)"
+  }
+}
