@@ -331,6 +331,15 @@ repeats, identical tokens). It had been carried as the last "assumption, not a
 guarantee" item; the assumption was instrumented and the flag is now on by default.
 The mechanism and the two things it corrected are below.
 
+A second follow-on is the gate's pre-top-k chain, **+0.072 ms/step (+0.28%)**
+(`results/ab-gate-prep-fused.json`, 9 interleaved repeats, identical tokens,
+`_GATE_PREP_FUSED`). `Gate.forward` spent four launches per layer -- softplus, sqrt,
+the bias add, and a division by `gate_temp` that is a numeric no-op at the shipped
+value of 1.0 -- on a `[n, 384]` fp32 tensor, so it was nearly all launch overhead.
+Making it bit-exact needed two primitives that are not the ones that look right, and
+the residue was localized rather than guessed at; see
+[Verification](OPTIMIZE-RESULTS.md#verification).
+
 The pass is **400 fewer launches per step** on the same analysis basis (3,896 →
 3,496, `results/decode-stacks-attribution-moe-eager.txt`). That count is a different
 series from the 6,232 → 4,558 above, which came from `analyze_decode_trace.py` on
@@ -369,7 +378,7 @@ awkward:
 
 | Item | ms/step | Why it is still there |
 | --- | ---: | --- |
-| `Gate.forward` elementwise tail and top-k | ~0.9 | needs a kernel matching `softplus`, `sqrt`, the 6-element sum order and the top-k tie-breaking bit-for-bit. The **sum order was probed and does not reproduce**: six candidate orders for `[1, 6]` fp32 all mismatch torch on about half of 2,000 draws, which is the same wall the two `mean`s hit. The pre-top-k half has no reduction and is fusable, but the three launches it would replace measure 0.161 ms/step |
+| `Gate.forward` elementwise tail and top-k | ~0.9, of which **the pre-top-k half is taken** | the pre-top-k chain is now fused (+0.072 ms/step, `_GATE_PREP_FUSED`). What remains is the post-top-k half -- `gather`, `sum`, `+1e-20`, `div`, `*route_scale` -- and it needs the 6-element sum order and the top-k tie-breaking bit-for-bit. The **sum order was probed and does not reproduce**: six candidate orders for `[1, 6]` fp32 all mismatch torch on about half of 2,000 draws, which is the same wall the two `mean`s hit |
 | Two `aten::mean` sites (RMSNorm, `hc_mixes`) | 0.63 | torch's reduction order is not reproducible; the one-kernel RMSNorm is 2.97% faster and differs on ~5 bf16 elements per million |
 | `hc_split_sinkhorn`, 2 calls per layer | 0.16 | the kernel is already batched over its leading dim, but the two calls use different scale/base tensors, so merging them changes its signature |
 | The two `torch.cat` in `Attention.forward` | 0.14 | removing them means giving `sparse_attn` two KV sources instead of one |

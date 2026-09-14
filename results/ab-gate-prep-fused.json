@@ -1,0 +1,30 @@
+{
+ "on_ms": [
+  26.133535336703062,
+  26.274857212168477,
+  26.11016018781811,
+  26.139136341710884,
+  26.065076057178278,
+  26.22851983178407,
+  26.1954430413122,
+  26.066116437626384,
+  25.948354384551447
+ ],
+ "off_ms": [
+  26.119645133924983,
+  26.18043546875318,
+  26.33039039404442,
+  26.258944099148117,
+  26.1351183289662,
+  26.277895628785092,
+  26.182477300365765,
+  26.20561507064849,
+  26.26123942900449
+ ],
+ "median_on": 26.133535336703062,
+ "median_off": 26.20561507064849,
+ "tokens_identical": true,
+ "prompt_len": 2048,
+ "decode_steps": 30,
+ "note": "Replaces four launches per layer (softplus, sqrt, the bias add, and the division by gate_temp == 1.0, which is a numeric no-op) with one, over a [n, 384] fp32 tensor. 8 of 9 off samples above the on median, p=0.019."
+}

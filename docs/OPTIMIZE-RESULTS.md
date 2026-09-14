@@ -1707,6 +1707,15 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   `--inject` forces one real stale read and must be reported; a run that reports 0
   with `--inject` means the detector is blind, which is how it was caught reporting 0
   while only covering the explicit-`xq` call sites.
+- `check_gate_prep_exact.py` gates the fused gate pre-top-k chain, and it is the gate
+  rather than a formality: the routing weights scale every expert. It draws over the
+  softplus threshold and both sides of it, `exp` overflow, the negative tail and
+  denormals, and gets 0 of 768,000 fp32 elements differing for both outputs. Two of
+  the three primitives were not the obvious ones -- `libdevice.sqrt` is the
+  *approximate* path (1 ulp on ~17% of inputs) and `libdevice.sqrt_rn` still returns 0
+  for a denormal input where ATen returns ~1e-19, because Triton's fp32 arithmetic
+  flushes denormals; `probe_gate_residue.py` localized that by showing all 7,001
+  differing elements at `e < 2**-126` and none outside it.
 - `check_expert_swiglu_exact.py` gates the fused shared-expert SwiGLU tail. It
   covers the shape that differs from the routed experts' (`check_moe_swiglu_exact.py`)
   -- one row, no routing weight, and `limit=0` as well as the real limit, where the
@@ -1901,6 +1910,19 @@ CUDA_VISIBLE_DEVICES=0 python check_expert_swiglu_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_mixes_decode.py
 CUDA_VISIBLE_DEVICES=0 python check_act_quant_cache.py
+
+# the fused gate pre-top-k chain against torch's four ops. The primitives matter:
+# libdevice.sqrt is the approximate path, and libdevice.sqrt_rn flushes denormal
+# INPUTS, so the tiny range goes through an exact 2**48 scale. probe_gate_prim.py
+# isolates each primitive and probe_gate_residue.py locates where the composite
+# still differs -- that is how the sqrt was found rather than suspected.
+CUDA_VISIBLE_DEVICES=0 python check_gate_prep_exact.py --draws 2000
+CUDA_VISIBLE_DEVICES=0 python probe_gate_prim.py
+CUDA_VISIBLE_DEVICES=0 python probe_gate_residue.py
+
+# the A/B for the fused gate chain
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py \
+  --flag _GATE_PREP_FUSED --repeats 9
 
 # does the opt-in act_quant buffer cache ever hand a consumer an overwritten row?
 # Needs 4 GPUs: it runs the real model. --inject is the power check and must report
