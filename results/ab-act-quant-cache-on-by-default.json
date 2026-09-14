@@ -1,0 +1,31 @@
+{
+ "on_ms": [
+  26.278210066569347,
+  26.07758898908893,
+  26.135202140236895,
+  26.20091544619451,
+  26.24858298804611,
+  26.081385269450646,
+  26.164011013073228,
+  26.167476332436003,
+  26.036126189865172
+ ],
+ "off_ms": [
+  26.241630346824728,
+  26.326629434091352,
+  26.27051427649955,
+  26.232381576361757,
+  26.244317872139316,
+  26.24238965411981,
+  26.579022066046793,
+  26.217734456683196,
+  26.22901739863058
+ ],
+ "median_on": 26.164011013073228,
+ "median_off": 26.24238965411981,
+ "tokens_identical": true,
+ "prompt_len": 2048,
+ "decode_steps": 30,
+ "note": "Re-measured on the current revision. The earlier run of this flag (ab-act-quant-cache.json) predates _ATTN_SHARED_QUANT and _MOE_SHARED_QUANT, which cut act_quant calls per decode step from ~410 to ~290 -- so the scratch this cache saves is a third smaller and the win is correspondingly smaller: +0.202 ms/step then, +0.078 now. Both are kept; neither is a baseline for the other.",
+ "rank_note": "Ranges overlap (on max 26.278, off min 26.218) but all 9 off samples sit above the on median, p=0.5^9=0.002 under the null, and the off arm is uniformly higher."
+}

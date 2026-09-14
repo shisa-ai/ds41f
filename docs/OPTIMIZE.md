@@ -324,6 +324,13 @@ the time, and the combined run is the clean basis. The same run is also the chec
 the flags do not interact: prefill logits bit-equal over 66,191,360 values and no
 differing token in 64 steps with all four toggled together.
 
+One more change landed after that measurement and is therefore **not** in the 1.345:
+the `act_quant` buffer cache, re-measured at **+0.078 ms/step (+0.30%)** on the
+post-pass baseline (`results/ab-act-quant-cache-on-by-default.json`, 9 interleaved
+repeats, identical tokens). It had been carried as the last "assumption, not a
+guarantee" item; the assumption was instrumented and the flag is now on by default.
+The mechanism and the two things it corrected are below.
+
 The pass is **400 fewer launches per step** on the same analysis basis (3,896 →
 3,496, `results/decode-stacks-attribution-moe-eager.txt`). That count is a different
 series from the 6,232 → 4,558 above, which came from `analyze_decode_trace.py` on
@@ -368,7 +375,44 @@ awkward:
 | The two `torch.cat` in `Attention.forward` | 0.14 | removing them means giving `sparse_attn` two KV sources instead of one |
 | `RowParallelLinear`'s fp32 cast pair | 0.14 | the fp32 all-reduce is deliberate; the cast into it could only go if the GEMV stored the bf16 rounding in fp32 |
 | The Indexer's `torch.sort` of 512 indices | 0.21 | 22.8 µs for 512 int32, a fixed-cost radix kernel; a Triton bitonic sort measures 15.1 µs, so the prize is 0.06 ms/step |
-| `kernel._ACT_QUANT_CACHE_ENABLED` | 0.27 | measured at +1.01% and left off: it returns *shared* buffers, so it is sound only where every consumer is enqueued immediately after its producer on one stream, and the MoE's graph build captures on a side stream |
+| `kernel._ACT_QUANT_CACHE_ENABLED` | **taken** | was 0.27 and left off for an aliasing assumption; the assumption was tested instead of restated, and the flag is now on by default at `model._ACT_QUANT_CACHE`. Re-measured at **+0.078 ms/step (+0.30%)**, down from the +0.202 first measured, because the shared-quant changes above removed a third of the calls whose scratch it saves |
+
+**The act_quant buffer cache, and what it turned out to be.** This was the last item
+carried as "an assumption, not a guarantee", so the assumption was instrumented
+rather than argued. `check_act_quant_alias.py` hands each produced pair back as a
+fresh *view* of the shared buffer, tagged with the epoch it was written in -- views
+share storage but are distinct objects, so the tag travels with the object the
+consumer receives and a later produce cannot overwrite it. Every consumer is then
+wrapped (the fp8/fp4 GEMV and GEMM entry points, and the MoE's Triton `_w13`/`_w2`)
+and compares its tag against the cache's current epoch. Over one prefill and 32 decode
+steps: **1,871 produces across 13 keys, 4,344 consumer reads, 0 stale reads.** The
+detector is shown to have power rather than assumed to: `--inject` forces one real
+stale read and is reported, naming the hand-out site and the stale consumer.
+
+Two things about that result were not what the docstring said:
+
+- The hazard it warned about -- "the MoE's graph build captures on a side stream" --
+  does not exist in the shipped configuration. `MoE.forward` returns early when
+  `_SG_BUILDING` or `torch.cuda.is_current_stream_capturing()`, so inside the
+  whole-step capture the MoE is inlined into the outer graph and there is no second
+  stream. The side-stream capture is the `_STEP_GRAPHS=0` path.
+- The stated benefit was wrong for the default path. The docstring justified the cache
+  with "dispatch is 16.8 us/call and this is called ~410x per step", but under step
+  graphs the Python does not run at replay at all -- the layer bodies are captured, and
+  both `_sg_build` segments cover `e0..e1-1` and `e1..end`. What the cache actually
+  buys is **scratch footprint**: one buffer per key instead of one per call leaves
+  ~3 MB less live scratch inside the captured graph. That is why an A/B that rebuilds
+  the graph per arm (as `bench_ab.py` does) measures a real effect, and why the number
+  shrank to +0.078 ms/step once the shared-quant changes removed a third of the calls.
+  Both the docstring and the kernel's default now say this.
+
+The flag is on at `model._ACT_QUANT_CACHE` rather than in `kernel`, so `act_quant`
+keeps its safe default for any caller outside the verified set. Correctness:
+`check_decode_parity.py --flag kernel._ACT_QUANT_CACHE_ENABLED` is bit-exact over
+prefill (0/66191360) and 64 decode steps, and `check_act_quant_cache.py` still reports
+0 differing bytes cached vs uncached. `check_decode_parity.py` gained dotted-name
+`--flag` support to run that, since the flag lives in `kernel` and the harness
+previously only did `setattr(model, flag)`.
 
 The larger remaining lever is not in this table. The Marlin comparison is 2.8x faster
 than the engine's grouped GEMV at the real per-rank mix, which on `_w13` + `_w2`

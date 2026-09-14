@@ -1696,6 +1696,17 @@ its prefill criterion is a single prompt position. Five checks cover those gaps:
   fused `hc_mixes` coefficient math at decode (0 of 4,800 fp32 elements differ over
   200 draws at four seeds), and `check_act_quant_cache.py` does the same for the cached
   `act_quant` path (0 differing bytes over 3 reps x 3 shapes).
+- `check_act_quant_alias.py` is the other half of that gate, and the one that lets the
+  cache be on by default: byte-exactness says the cached value is right *when it is
+  produced*, and this says it is still right *when it is consumed*. It hands each
+  produced pair back as a fresh view of the shared buffer tagged with its write epoch
+  (views share storage but are distinct objects, so a later produce cannot overwrite
+  the tag), wraps every consumer -- fp8/fp4 GEMV and GEMM, and the MoE's Triton
+  `_w13`/`_w2` -- and reports any consumer whose tag is stale. One prefill plus 32
+  decode steps: 1,871 produces across 13 keys, 4,344 consumer reads, 0 stale.
+  `--inject` forces one real stale read and must be reported; a run that reports 0
+  with `--inject` means the detector is blind, which is how it was caught reporting 0
+  while only covering the explicit-`xq` call sites.
 - `check_expert_swiglu_exact.py` gates the fused shared-expert SwiGLU tail. It
   covers the shape that differs from the routed experts' (`check_moe_swiglu_exact.py`)
   -- one row, no routing weight, and `limit=0` as well as the real limit, where the
@@ -1890,6 +1901,22 @@ CUDA_VISIBLE_DEVICES=0 python check_expert_swiglu_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_exact.py
 CUDA_VISIBLE_DEVICES=0 python check_hc_mixes_decode.py
 CUDA_VISIBLE_DEVICES=0 python check_act_quant_cache.py
+
+# does the opt-in act_quant buffer cache ever hand a consumer an overwritten row?
+# Needs 4 GPUs: it runs the real model. --inject is the power check and must report
+# a stale read; without it the run must report 0.
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_act_quant_alias.py --steps 32
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_act_quant_alias.py --steps 8 --inject
+
+# bit-exactness of the cache, on vs off. The flag lives in `kernel`, so --flag takes
+# a dotted module.attribute; check_decode_parity.py resolves either form.
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 check_decode_parity.py \
+  --flag kernel._ACT_QUANT_CACHE_ENABLED --steps 64
+
+# the A/B. bench_ab.py rebuilds the step graphs per arm, which this flag needs: it
+# changes the captured graph's scratch layout, so a replayed graph would measure nothing.
+DSV41F_ENGRAM_OFFLOAD=1 $PY --nproc-per-node 4 bench_ab.py \
+  --flag kernel._ACT_QUANT_CACHE_ENABLED --repeats 9
 CUDA_VISIBLE_DEVICES=0 python check_gate_weight_cache.py
 CUDA_VISIBLE_DEVICES=0 python probe_host_dispatch.py
 CUDA_VISIBLE_DEVICES=0 python probe_rsqrt.py
