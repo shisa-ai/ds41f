@@ -29,8 +29,8 @@ chain (+0.072).
 Two things to carry forward from it. The metric series is **drift-anchored, not
 raw**: the machine was shared with another 131 GB job for the last iterations, so
 each metric is that run's on-arm median corrected by the same run's off-arm offset
--- the only comparison the contention does not contaminate. And the campaign's
-headline throughput table is a *different* harness, so it needs its own re-run
+-- an estimate that remains sensitive to changes in contention between arms.
+And the campaign's headline throughput table is a *different* harness, so it needs its own re-run
 rather than being scaled from this series; the README says so where it quotes it.
 What is left in section 3 is now tabulated with its measured size and its specific
 blocker, and the two largest remaining levers are both outside the bit-exactness

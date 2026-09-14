@@ -113,14 +113,12 @@ to 27.51-28.44 ms/token). Prompt processing is unchanged within noise (1,330 to
 and prefill keeps the reference expressions. See
 [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
 
-That 12.6-15.3% is the raw comparison, and it understates the change, because the
-machine was about 7% slower for the later run: its own reference arm measures
-216.9-217.6 ms/token against 202.5-204.2 in the pre-fusion run. Using each run's
-reference arm as the drift control, the optimized path takes **0.127-0.131 of the
-reference decode time against 0.159-0.160 before, so 17.7-21.1% faster**, which on
-the pre-fusion machine's basis is 25.6-26.8 ms/token. That agrees with the decode
-campaign's independently drift-anchored series (28.04 to 25.97 ms/step), which is
-the cross-check that the two harnesses are measuring the same thing.
+The reference arm was slower in the later run (216.9-217.6 versus
+202.5-204.2 ms/token), so machine conditions also changed. Normalizing by that
+arm suggests a 17.7-21.1% latency reduction, but this assumes both paths respond
+proportionally to contention. That assumption has not been established. Use the
+raw measurements above as the recorded result; a fresh run is needed to establish
+current performance under consistent conditions.
 
 This table was measured before the rotary-embedding fusion, which is now on by
 default. Its own interleaved A/B measures **2.3% lower decode latency at identical
@@ -130,7 +128,7 @@ run above, and the measurement and that limitation are both recorded in
 [Fused rotary embedding](docs/OPTIMIZE-RESULTS.md#fused-rotary-embedding).
 
 **Where the campaign stands (2026-09-14).** The table above has not been re-run
-since the changes listed below, so it understates the current engine. The
+since the changes listed below, so it does not establish current performance. The
 controlled series the campaign is tracked on -- `bench_ab.py`, 2K prompt, 30 decode
 steps, 9-15 interleaved repeats per arm, step graph rebuilt per arm, identical
 tokens -- has the decode step at **25.97 ms/step against a 28.04 ms/step baseline,
@@ -148,8 +146,9 @@ and [results/](results/).
 
 Two caveats on that number. The metric series is **drift-anchored, not raw**: the
 machine was shared with another 131 GB job through the last iterations, so each
-iteration's metric is its on-arm median corrected by that same run's off-arm offset,
-which is the only comparison the contention does not contaminate. The raw samples
+iteration's metric is its on-arm median corrected by that same run's off-arm offset.
+This adjustment reduces some variation but does not eliminate contention as a
+possible influence on the result. The raw samples
 for every run are in `results/`. And the headline table above is a *different*
 harness (`benchmark_ds41f.py`, 512/2K/8K with 32 decode steps), so it should be
 re-run before quoting rather than scaled from the A/B series.
