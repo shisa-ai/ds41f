@@ -316,12 +316,19 @@ is re-analysed in seconds. The corrected per-function table is in
 | Quantize the MoE's input row once | +0.244 | +0.92% | identical |
 | Quantize the attention block's input once | +0.136 | +0.52% | identical |
 
-That is **1.29 ms/step, 4.8% lower decode latency** over the pass at identical
-tokens, and **400 fewer launches per step** on the same analysis basis
-(3,896 → 3,496, `results/decode-stacks-attribution-moe-eager.txt`). That count is a
-different series from the 6,232 → 4,558 above, which came from
-`analyze_decode_trace.py` on graphed traces; do not splice them. Every change is
-behind a default-on flag with a bit-exactness check of its own, listed in
+That is **1.345 ms/step, 4.90% lower decode latency** over the pass at identical
+tokens, measured as one change set -- all four flags against none, five interleaved
+repeats, `results/ab-third-fusion-pass-combined.json`. **Do not quote the sum of the
+four rows above** (1.286 ms/step): each was measured against the baseline current at
+the time, and the combined run is the clean basis. The same run is also the check that
+the flags do not interact: prefill logits bit-equal over 66,191,360 values and no
+differing token in 64 steps with all four toggled together.
+
+The pass is **400 fewer launches per step** on the same analysis basis (3,896 →
+3,496, `results/decode-stacks-attribution-moe-eager.txt`). That count is a different
+series from the 6,232 → 4,558 above, which came from `analyze_decode_trace.py` on
+graphed traces; do not splice them. Every change is behind a default-on flag with a
+bit-exactness check of its own, listed in
 [Verification](OPTIMIZE-RESULTS.md#verification).
 
 Three findings from this pass, in the same spirit as the two above:
@@ -355,7 +362,7 @@ awkward:
 
 | Item | ms/step | Why it is still there |
 | --- | ---: | --- |
-| `Gate.forward` elementwise tail and top-k | ~0.9 | needs a kernel matching `softplus`, `sqrt`, the 8-element sum order and the top-k tie-breaking bit-for-bit |
+| `Gate.forward` elementwise tail and top-k | ~0.9 | needs a kernel matching `softplus`, `sqrt`, the 6-element sum order and the top-k tie-breaking bit-for-bit. The **sum order was probed and does not reproduce**: six candidate orders for `[1, 6]` fp32 all mismatch torch on about half of 2,000 draws, which is the same wall the two `mean`s hit. The pre-top-k half has no reduction and is fusable, but the three launches it would replace measure 0.161 ms/step |
 | Two `aten::mean` sites (RMSNorm, `hc_mixes`) | 0.63 | torch's reduction order is not reproducible; the one-kernel RMSNorm is 2.97% faster and differs on ~5 bf16 elements per million |
 | `hc_split_sinkhorn`, 2 calls per layer | 0.16 | the kernel is already batched over its leading dim, but the two calls use different scale/base tensors, so merging them changes its signature |
 | The two `torch.cat` in `Attention.forward` | 0.14 | removing them means giving `sparse_attn` two KV sources instead of one |
@@ -367,6 +374,18 @@ The larger remaining lever is not in this table. The Marlin comparison is 2.8x f
 than the engine's grouped GEMV at the real per-rank mix, which on `_w13` + `_w2`
 (4.44 ms/step) is worth several ms; it is W4A16 against the engine's W4A8, so it needs
 its own correctness gate rather than this pass's bit-exactness one.
+
+The Gate's tail is the item that looks most tractable and is not, so it is worth
+saying why in full. Its chain is 400 launches at 0.465 ms/step around a `topk` that
+costs 0.437, and the post-top-k half (`gather`, `sum`, `+1e-20`, `div`, `*route_scale`)
+is five launches of exact fp32 arithmetic with no transcendental in it. What blocks it
+is the `sum`: six candidate association orders for a `[1, 6]` fp32 reduction all
+disagree with `torch.sum` on about half of 2,000 random draws, so the order is not one
+of the plausible trees. That is the third reduction this engine has hit the same wall
+on, after the RMSNorm `mean` (three shapes tried) and the `hc_mixes` `mean`. The
+pre-top-k half has no reduction in it and could be fused, but the three launches it
+replaces measure 0.161 ms/step, so the prize does not cover a new kernel plus its
+exactness check.
 
 ## 4. Remove cohort waste and sampling synchronization
 
