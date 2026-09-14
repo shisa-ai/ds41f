@@ -95,22 +95,32 @@ need their own measurements.
 
 ## Performance
 
-One request, four GPUs, text only. Averages of two runs of the optimized
-configuration in [`results/trusted-sgbatch.json`](results/trusted-sgbatch.json),
-with the pre-fusion run in [`results/trusted-shipped.json`](results/trusted-shipped.json)
-for comparison:
+One request, four GPUs, text only. Averages of four runs of the optimized
+configuration in
+[`results/trusted-rope-fused-4rep.json`](results/trusted-rope-fused-4rep.json)
+(`status: passed`), with the pre-fusion run in
+[`results/trusted-shipped.json`](results/trusted-shipped.json) for comparison:
 
 | Prompt/context length | Prompt processing | Time to process prompt | Decode throughput | Decode latency |
 | --- | ---: | ---: | ---: | ---: |
-| 512 tokens | 1,346 tok/s | 0.38 s | 35.79 tok/s | 27.94 ms/token |
-| 2,048 tokens | 2,573 tok/s | 0.80 s | 35.65 tok/s | 28.05 ms/token |
-| 8,192 tokens | 3,366 tok/s | 2.43 s | 35.67 tok/s | 28.04 ms/token |
+| 512 tokens | 1,338 tok/s | 0.38 s | 35.6 tok/s | 28.08 ms/token |
+| 2,048 tokens | 2,556 tok/s | 0.80 s | 36.4 tok/s | 27.51 ms/token |
+| 8,192 tokens | 3,365 tok/s | 2.43 s | 35.2 tok/s | 28.44 ms/token |
 
-The decode kernels are 13.8-14.3% faster than the pre-fusion baseline (32.40-32.56
-ms/token to 27.94-28.05 ms/token, or +16.0% to +16.7% throughput). Prompt
-processing is unchanged within noise (1,330 to 1,346, 2,580 to 2,573, 3,392 to
-3,366 tok/s): the fused kernels are decode-only, and prefill keeps the reference
-expressions. See [Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
+The decode kernels are 12.6-15.3% faster than the pre-fusion baseline (32.40-32.56
+to 27.51-28.44 ms/token). Prompt processing is unchanged within noise (1,330 to
+1,338, 2,580 to 2,556, 3,392 to 3,365 tok/s): the fused kernels are decode-only,
+and prefill keeps the reference expressions. See
+[Decode kernel fusion](docs/OPTIMIZE-RESULTS.md#decode-kernel-fusion).
+
+That 12.6-15.3% is the raw comparison, and it understates the change, because the
+machine was about 7% slower for the later run: its own reference arm measures
+216.9-217.6 ms/token against 202.5-204.2 in the pre-fusion run. Using each run's
+reference arm as the drift control, the optimized path takes **0.127-0.131 of the
+reference decode time against 0.159-0.160 before, so 17.7-21.1% faster**, which on
+the pre-fusion machine's basis is 25.6-26.8 ms/token. That agrees with the decode
+campaign's independently drift-anchored series (28.04 to 25.97 ms/step), which is
+the cross-check that the two harnesses are measuring the same thing.
 
 This table was measured before the rotary-embedding fusion, which is now on by
 default. Its own interleaved A/B measures **2.3% lower decode latency at identical
@@ -195,7 +205,7 @@ The batched step itself was slow for two reasons, both fixed. A batch of two cos
 
 ### Limits
 
-- **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position, where the two paths agree. Over the whole prompt they differ by 15.7–16.1 on the logits with 76.8–81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
+- **Whole-prompt parity is unresolved.** The trusted run compares only the last prompt position. Even there the two paths are not bit-identical at prefill: across the passing runs the last-position prefill logits differ by 0.49-1.25, with top-1 agreement 1.0, and the runs that crossed the gate's threshold (1.26 and 1.43) are marked failed rather than reported as passing -- see `trusted-rope-fused-4rep.json` against `trusted-current.json` and `trusted-sgbatch.json`. Decode is exactly 0.0 in every one of them. Over the whole prompt the two paths differ by 15.7-16.1 on the logits with 76.8-81.2% top-1 agreement, and repeated runs of the same configuration vary by a similar amount: the grouped prefill's `atomic_add` reduction is nondeterministic. Neither result establishes whole-prompt correctness.
 - **Decode agreement holds only for a shared starting state.** It does not show that prompt processing builds equivalent state.
 - **Concurrency is measured and works, with a cohorting gap.** Aggregate throughput at concurrency 4 went from 15.03 to 39.07 tok/s once batched decode stopped falling off the whole-step graph and off the prefill MoE path. What remains is scheduling, not compute: a cohort is whatever is in the wait queue when the engine asks, so a request that arrives a moment late waits a full generation (3.1-7.4 s TTFT at concurrency 4, where no run admitted all four requests together). `DS41F_ADMIT_WINDOW_MS=8` closes that gap by holding an under-filled cohort open for 8 ms (52.42 tok/s and 226 ms worst TTFT at concurrency 4); it is opt-in because the delay is paid by a lone request. See [Served latency](docs/OPTIMIZE-RESULTS.md#served-latency).
 - **No matched vLLM comparison.** Local vLLM numbers use different workloads and methods, so the speedup is uncontrolled.
