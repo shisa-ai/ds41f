@@ -1,0 +1,17 @@
+{
+  "change": "the four decode changes of the third fusion pass, toggled together",
+  "flag": "_GATE_WEIGHT_CACHE,_EXPERT_SWIGLU_FUSED,_MOE_SHARED_QUANT,_ATTN_SHARED_QUANT",
+  "harness": "bench_ab.py --repeats 5, all four flags against none",
+  "env": "DSV41F_ENGRAM_OFFLOAD=1, TP4, B=1, 2048 context, worst rank",
+  "on_ms_per_step": [26.166, 26.029, 26.047, 26.115, 26.107],
+  "off_ms_per_step": [27.400, 27.484, 27.538, 27.452, 27.414],
+  "on_median": 26.107,
+  "off_median": 27.452,
+  "delta_ms_per_step": 1.345,
+  "delta_percent_latency": 4.90,
+  "identical_tokens": true,
+  "note": "This is the number to quote for the pass. The four per-change rows in the docs were each measured against the baseline current at the time, so they do not sum to it: 0.456 + 0.450 + 0.244 + 0.136 = 1.286, and the combined measurement is 1.345. The on-arm median here agrees with the 7-repeat _ATTN_SHARED_QUANT on-arm (26.128), which is the same configuration.",
+  "exactness": {
+    "check_decode_parity.py": "with all four flags toggled together: prefill logits bit-equal 66191360/66191360, decode logits bit-equal at every step, first differing token step = None (64 steps). This is the check that the flags do not interact."
+  }
+}
